@@ -98,7 +98,7 @@ Every business gets a unique URL (`viralis.io/meet/your-brand`) that customers c
 
 ```bash
 # Clone the repo
-git clone https://github.com/ravixalgorithm/viralis.git
+git clone https://github.com/RajatPatelHBTU/Viralis.git
 cd viralis
 
 # Install dependencies
