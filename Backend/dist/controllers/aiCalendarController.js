@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRecentPosts = exports.getCalendarStats = exports.updatePostStatus = exports.getPosts = exports.savePost = exports.generateDayContent = exports.getCalendar = exports.generateCalendar = void 0;
-const uuid_1 = require("uuid");
+const crypto_1 = require("crypto");
 const aiContentService_1 = require("../utils/aiContentService");
 // In-memory store for this prototype. In production, use a database like Redis or a persistent DB.
 const calendarStore = new Map();
@@ -49,7 +49,7 @@ const generateCalendar = async (req, res) => {
     try {
         const calendar = await (0, aiContentService_1.generate30DayCalendar)({ niche, platform, city, description, brandName });
         // Create a unique ID for this calendar
-        const calendarId = `cal_${Date.now()}_${(0, uuid_1.v4)().substring(0, 8)}`;
+        const calendarId = `cal_${Date.now()}_${(0, crypto_1.randomUUID)().substring(0, 8)}`;
         // Store the generated calendar in our in-memory map
         calendarStore.set(calendarId, calendar);
         return res.status(200).json({
@@ -137,7 +137,7 @@ const savePost = async (req, res) => {
     // Add metadata
     const savedPost = {
         ...post,
-        id: (0, uuid_1.v4)(),
+        id: (0, crypto_1.randomUUID)(),
         savedAt: new Date().toISOString(),
         scheduledDate: date,
         strategyType: type // viral, reach, or niche

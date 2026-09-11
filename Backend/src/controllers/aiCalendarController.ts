@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { generate30DayCalendar, DayPost, CalendarInput } from "../utils/aiContentService";
 
 // In-memory store for this prototype. In production, use a database like Redis or a persistent DB.

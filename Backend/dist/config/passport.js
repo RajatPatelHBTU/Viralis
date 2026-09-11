@@ -24,25 +24,17 @@ passport_1.default.deserializeUser(async (id, done) => {
 });
 // Google Strategy
 passport_1.default.use(new passport_google_oauth20_1.Strategy({
-    clientID: process.env.GOOGLE_CLIENT_ID || '',
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    clientID: process.env.GOOGLE_CLIENT_ID || 'dummy_google_client_id',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'dummy_google_client_secret',
     callbackURL: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/youtube/callback`,
     passReqToCallback: true,
 }, async (_req, accessToken, refreshToken, profile, done) => {
-    // We expect the user to be logged in and the JWT middleware to have attached the user to req.user
-    // However, passport-google-oauth20 might not preserve req.user if session is false and we don't handle it carefully.
-    // For connecting accounts, we usually pass a state parameter with the user's JWT or ID, or rely on a session cookie if available.
-    // Since we are JWT based, we might need a workaround.
-    // A common pattern for "Connect Account" is:
-    // 1. Frontend sends JWT in "state" parameter.
-    // 2. Callback decodes "state" to find user.
-    // For now, we will return the tokens and profile, and handle the user update in the controller callback.
     return done(null, { profile, accessToken, refreshToken });
 }));
 // Facebook Strategy
 passport_1.default.use(new passport_facebook_1.Strategy({
-    clientID: process.env.FACEBOOK_APP_ID || '',
-    clientSecret: process.env.FACEBOOK_APP_SECRET || '',
+    clientID: process.env.FACEBOOK_APP_ID || 'dummy_facebook_app_id',
+    clientSecret: process.env.FACEBOOK_APP_SECRET || 'dummy_facebook_app_secret',
     callbackURL: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/facebook/callback`,
     passReqToCallback: true,
     profileFields: ['id', 'displayName', 'emails', 'photos'],
