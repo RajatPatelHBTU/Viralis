@@ -155,6 +155,6 @@ MIT License - feel free to use this for your own projects!
 
 **🏆 Built for Hackathon 2026**
 
-[Try the Demo](https://viralis.vercel.app/) | [Watch Video](https://youtu.be/gaeAeZhMcSE) | [GitHub](https://github.com/sanyamhbtu/viralis)
+[Try the Demo](https://viralis.vercel.app/) | [Watch Video](https://youtu.be/gaeAeZhMcSE) | [GitHub](https://github.com/RajatPatelHBTU/Viralis)
 
 </div>
