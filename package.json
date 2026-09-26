@@ -5,7 +5,7 @@
   "description": "Viralis - AI-Powered Social Media Management & Voice Outreach",
   "scripts": {
     "dev": "npm run dev --prefix frontend",
-    "build": "npm run build --prefix frontend",
+    "build": "cd frontend && npm install && npm run build",
     "start": "npm run start --prefix frontend",
     "dev:backend": "npm run dev --prefix Backend",
     "build:backend": "npm run build --prefix Backend",
