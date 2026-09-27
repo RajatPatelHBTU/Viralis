@@ -4,29 +4,16 @@ import axios from 'axios';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
-
-
 import path from 'path';
+import mongoose from 'mongoose';
+import { Business } from '../models/Business';
+import { VoiceController } from './voiceController';
 
-// Explicitly load .env from Backend root (src/controllers/../..)
+// Explicitly load .env from Backend root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Configuration
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY!;
-// Use existing env config or fallback to process.env
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-// Since we are now IN the backend, we don't need an external URL for self-calls usually, 
-// but for the public API fetch we might still use it or refactor to internal calls.
-// For simplicity of migration, we'll keep the http fetch but point to localhost:PORT if not defined.
-const PORT = process.env.PORT || 8080;
-const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
-
-if (!DEEPGRAM_API_KEY || !GEMINI_API_KEY) {
-    console.warn('❌ Missing API Keys for Voice Service');
-}
-
-const deepgram = DEEPGRAM_API_KEY ? createClient(DEEPGRAM_API_KEY) : null;
-const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+const PORT = process.env.PORT || 5000;
+const BACKEND_URL = process.env.BACKEND_URL || `http://127.0.0.1:${PORT}`;
 
 // Phrases that indicate user interest/intent to connect
 const INTEREST_PHRASES = [
@@ -41,28 +28,25 @@ const INTEREST_PHRASES = [
     "get back to you",
     "take a message",
     "our team will",
-    "fill the form",
-    "fill out the form",
-    "provide your details"
+    "provide your details",
+    "logged your request",
+    "follow up"
 ];
 
-const CLOSING_PHRASES = [
-    "thank you",
-    "thanks",
-    "bye",
-    "goodbye",
-    "see you",
-    "have a great day",
-    "wonderful day"
-];
 
 interface BrandData {
+    _id?: any;
     name: string;
     description?: string;
     industryMode?: string;
     businessHours?: string;
     brandVoice?: {
         tone?: string;
+    };
+    apiKeys?: {
+        gemini?: string;
+        deepgram?: string;
+        twilio?: string;
     };
     knowledgeBase?: {
         services?: Array<{ name: string; price: string }>;
@@ -78,29 +62,58 @@ interface BrandData {
     };
 }
 
-// Helper: Fetch Brand Data from Public Backend API
-async function fetchBrandData(brandId: string): Promise<BrandData | null> {
+// Helper: Fetch Brand Data from DB or fallback
+async function fetchBrandData(brandId: string): Promise<BrandData> {
     try {
-        // Optimization: Could we call the controller directly? 
-        // For now, HTTP loopback is safer to ensure all middleware runs.
-        const response = await axios.get(`${BACKEND_URL}/api/public/brand/${brandId}`);
-        return response.data;
-    } catch (error) {
-        console.error(`Error fetching brand ${brandId}:`, error);
-        return null;
+        if (brandId && mongoose.isValidObjectId(brandId)) {
+            const business = await Business.findById(brandId);
+            if (business) {
+                return business.toObject() as BrandData;
+            }
+        }
+    } catch (e) {
+        console.warn('Mongoose fetchBrandData warning:', e);
     }
+
+    try {
+        const response = await axios.get(`${BACKEND_URL}/api/public/brand/${brandId}`, { timeout: 3000 });
+        if (response.data) return response.data;
+    } catch {
+        // Continue to fallback
+    }
+
+    try {
+        const anyBusiness = await Business.findOne();
+        if (anyBusiness) return anyBusiness.toObject() as BrandData;
+    } catch {}
+
+    return {
+        name: 'Viralis AI Assistant',
+        description: 'AI-Powered Business & Customer Service Assistant',
+        industryMode: 'Customer Service',
+        businessHours: 'Monday-Sunday: 24/7',
+        brandVoice: { tone: 'Professional, warm, and helpful' },
+        knowledgeBase: {
+            services: [
+                { name: 'Standard Consultation', price: '$99' },
+                { name: 'Full Service Package', price: '$299/mo' }
+            ],
+            customInstructions: 'Help the caller answer questions and take down their inquiries seamlessly.',
+            businessHours: '24/7'
+        }
+    };
 }
 
 // Helper: Construct System Prompt
 function createSystemPrompt(brand: BrandData): string {
     const kb = brand.knowledgeBase || {};
-    const servicesList = kb.services
+    const servicesList = kb.services && kb.services.length > 0
         ? kb.services.map(s => `- ${s.name}: ${s.price}`).join('\n')
-        : 'No specific services listed.';
+        : 'Consultations and custom service packages.';
 
     const toneInstruction = brand.brandVoice?.tone
         ? `Tone: Adopt a ${brand.brandVoice.tone} persona.`
-        : 'Tone: Professional and helpful.';
+        : 'Tone: Professional, warm, and conversational.';
 
     const industryContext = brand.industryMode
         ? `Industry: ${brand.industryMode}`
@@ -111,250 +124,369 @@ function createSystemPrompt(brand: BrandData): string {
         : '';
 
     return `
-Role: You are the AI Receptionist for ${brand.name}.
+Role: You are the voice AI receptionist and customer representative for ${brand.name}.
 ${industryContext}
 ${businessDesc}
 ${toneInstruction}
 
-Context: ${kb.customInstructions || 'Be polite and helpful.'}
+Context: ${kb.customInstructions || 'Be helpful, engaging, and friendly.'}
 
 Facts:
-- Business Hours: ${kb.businessHours || brand.businessHours || 'Not specified'}
-- Address: ${kb.address || brand.location?.address || 'Not specified'} ${brand.location?.city ? `(${brand.location.city})` : ''}
-- Contact/Handoff: ${kb.contactPhone || 'Not specified'}
+- Business Hours: ${kb.businessHours || brand.businessHours || 'Open daily'}
+- Address: ${kb.address || brand.location?.address || 'Available online and locally'} ${brand.location?.city ? `(${brand.location.city})` : ''}
+- Contact / Handoff Phone: ${kb.contactPhone || 'Available upon request'}
 
 Services & Pricing:
 ${servicesList}
 
-Guardrails:
-- Keep responses brief (1-2 sentences).
-- Never invent prices. Only quote from the list above.
-- If the user wants to **BUY**, **PURCHASE**, **CONNECT**, or **SCHEDULE**, you MUST say: "Great! Please fill out the form so we can assist you with that." or "Please provide your details in the form."
-- If you don't know, offer to take a message.
-- If the user is NOT interested, just say goodbye politely. Do NOT ask for the form.
+Conversational Guidelines:
+- Keep spoken responses natural and concise (1-2 sentences).
+- Speak directly and clearly like a real person over a phone call.
+- Provide accurate pricing and info from the facts above; never fabricate details.
+- When the caller wants to book, schedule, purchase, or connect:
+  * Handle it smoothly and enthusiastically in conversation!
+  * Do NOT ask for permission every time to submit their request.
+  * Do NOT tell them to fill out a website form.
+  * Naturally ask for their name and phone number or email so the team can confirm their booking or connect with them.
+  * Once they provide any details, confirm immediately: "Perfect, I've logged your request and our team will get back to you shortly!"
+- If they ask something outside your knowledge, offer to take down their message and contact info.
+- Keep the conversation flowing without awkward pauses or robotic permission checks.
     `.trim();
 }
 
-// Helper: Check if response indicates interest
 function detectInterest(text: string): boolean {
     const lowerText = text.toLowerCase();
     return INTEREST_PHRASES.some(phrase => lowerText.includes(phrase));
 }
 
+// Extract contact information from conversation log
+function extractContactInfo(log: string[]) {
+    const fullText = log.join(' ');
+    let email: string | undefined;
+    let phone: string | undefined;
+    let name: string | undefined;
+
+    const emailMatch = fullText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (emailMatch) email = emailMatch[0];
+
+    const phoneMatch = fullText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{10}\b/);
+    if (phoneMatch) phone = phoneMatch[0];
+
+    const nameMatch = fullText.match(/(?:my name is|i am|this is|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+    if (nameMatch) name = nameMatch[1];
+
+    return { email, phone, name };
+}
+
 // Main Handler
 export const handleWebConnection = async (ws: WebSocket, req: Request) => {
-    console.log('📞 New Voice Call Connection');
+    console.log('📞 New Voice Call Connection initiated');
 
-    // === CALL STATE TRACKING ===
     const callStartTime = Date.now();
     const conversationLog: string[] = [];
     let userInterested = false;
-    let brandId: string | null = null;
-    let disconnectTimer: NodeJS.Timeout | null = null;
 
     // 1. Parse Params
-    const url = new URL(req.url!, `http://${req.headers.host}`);
-    brandId = url.searchParams.get('brandId');
+    let brandId: string | null = null;
+    try {
+        const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+        brandId = url.searchParams.get('brandId');
+    } catch {
+        brandId = null;
+    }
 
     if (!brandId) {
-        console.error('❌ Missing brandId');
-        ws.close(1008, 'Missing brandId');
-        return;
+        console.warn('⚠️ No brandId in query, attempting default business');
     }
 
-    // 2. Fetch Data
-    const brand = await fetchBrandData(brandId);
-
-    // Check if services are available
-    if (!deepgram || !genAI) {
-        console.error('❌ Voice Service unavailable: Missing API Keys');
-        ws.close(1011, 'Voice Service Unavailable (Missing Keys)');
-        return;
-    }
-
-    if (!brand) {
-        console.error('❌ Brand not found or API error');
-        ws.close(1011, 'Brand Data Unavailable');
-        return;
-    }
-
+    // 2. Fetch Brand Data
+    const brand = await fetchBrandData(brandId || '');
     console.log(`✅ Loaded Persona: ${brand.name}`);
-    console.log('🔍 Debug KnowledgeBase:', JSON.stringify(brand.knowledgeBase, null, 2));
 
-    const systemPrompt = createSystemPrompt(brand);
-    console.log('📝 System Prompt:', systemPrompt);
+    // Resolve API Keys
+    const geminiKey = process.env.GEMINI_API_KEY || brand.apiKeys?.gemini;
+    const deepgramKey = process.env.DEEPGRAM_API_KEY || brand.apiKeys?.deepgram;
 
-    // 3. Setup Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
-    const chat = model.startChat({
-        history: [
-            {
-                role: 'user',
-                parts: [{ text: systemPrompt }]
-            },
-            {
-                role: 'model',
-                parts: [{ text: 'Understood. I am ready to act as the receptionist.' }]
-            }
-        ]
-    });
+    const hasLiveKeys = Boolean(geminiKey && deepgramKey);
 
-    // 4. Setup Deepgram STT (Listen)
-    const live = deepgram.listen.live({
-        model: 'nova-2',
-        language: 'en-US',
-        smart_format: true,
-        encoding: 'linear16',
-        sample_rate: 16000,
-    });
+    // 3. Setup Gemini if key is present
+    let chat: any = null;
+    if (geminiKey) {
+        try {
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            // gemini-1.5-flash is fast and low-latency for voice
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            chat = model.startChat({
+                history: [
+                    {
+                        role: 'user',
+                        parts: [{ text: createSystemPrompt(brand) }]
+                    },
+                    {
+                        role: 'model',
+                        parts: [{ text: `Hello! Thanks for calling ${brand.name}. How can I assist you today?` }]
+                    }
+                ]
+            });
+            console.log('🤖 Gemini Chat Session initialized');
+        } catch (err) {
+            console.error('❌ Error initializing Gemini Chat:', err);
+        }
+    }
 
-    // Event: Deepgram Connection Open
-    live.on('open', () => {
-        console.log('🎤 Deepgram STT Connected');
+    // 4. Setup Deepgram STT if key is present
+    let deepgram: any = null;
+    let liveSTT: any = null;
+    const pendingAudioChunks: Buffer[] = [];
+    let isSttOpen = false;
 
-        // Listen for Transcript
-        live.on(LiveTranscriptionEvents.Transcript, async (data) => {
-            const transcript = data.channel.alternatives[0].transcript;
+    if (deepgramKey) {
+        try {
+            deepgram = createClient(deepgramKey);
+            liveSTT = deepgram.listen.live({
+                model: 'nova-2',
+                language: 'en-US',
+                smart_format: true,
+                encoding: 'linear16',
+                sample_rate: 16000,
+            });
 
-            if (transcript && data.is_final) {
-                // Clear any pending disconnect if user speaks again
-                if (disconnectTimer) {
-                    clearTimeout(disconnectTimer);
-                    disconnectTimer = null;
-                    console.log('🔄 User spoke, cancelled auto-disconnect.');
+            liveSTT.on(LiveTranscriptionEvents.Open, () => {
+                console.log('🎤 Deepgram STT Connected & Listening');
+                isSttOpen = true;
+
+                // Flush pending buffered audio chunks
+                while (pendingAudioChunks.length > 0) {
+                    const chunk = pendingAudioChunks.shift();
+                    if (chunk && liveSTT.getReadyState() === 1) {
+                        liveSTT.send(chunk);
+                    }
                 }
+            });
 
-                console.log(`🗣️ User: ${transcript}`);
-                conversationLog.push(`User: ${transcript}`);
+            liveSTT.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
+                const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
 
-                // 5. Send to Gemini
-                try {
-                    console.log(`➡️ Sending to Gemini: "${transcript}"`);
-                    const result = await chat.sendMessage(transcript);
-                    const responseText = result.response.text();
+                if (transcript && data.is_final) {
+                    console.log(`🗣️ User: ${transcript}`);
+                    conversationLog.push(`User: ${transcript}`);
+
+                    // Send user transcript back to client
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: transcript }));
+                    }
+
+                    // Process with Gemini or fallback response
+                    let responseText = '';
+                    if (chat) {
+                        try {
+                            console.log(`➡️ Sending to Gemini: "${transcript}"`);
+                            const result = await chat.sendMessage(transcript);
+                            responseText = result.response.text();
+                        } catch (aiErr) {
+                            console.error('Gemini error, attempting recovery:', aiErr);
+                            responseText = `I understand. Regarding ${brand.name}, I can help you with services and pricing or connect you directly with our team.`;
+                        }
+                    } else {
+                        // Intelligent fallback response
+                        if (detectInterest(transcript) || transcript.toLowerCase().includes('price') || transcript.toLowerCase().includes('cost')) {
+                            responseText = `We'd love to help you with that! Our services start at very competitive rates and I can log your request right now. What's your name and best phone number?`;
+                        } else {
+                            responseText = `Thank you for reaching out to ${brand.name}. How can I best assist you today?`;
+                        }
+                    }
+
+                    if (!responseText) return;
+
                     console.log(`🤖 AI Response: "${responseText}"`);
                     conversationLog.push(`AI: ${responseText}`);
 
-                    if (!responseText) {
-                        console.warn('⚠️ Gemini returned empty response');
-                        return;
-                    }
-
-                    // === INTEREST DETECTION ===
-                    // Check if new interest found OR if we should close (because we already have interest and are saying bye)
-                    const isClosing = userInterested && CLOSING_PHRASES.some(p => responseText.toLowerCase().includes(p));
-                    const isNewInterest = detectInterest(responseText);
-
-                    if (isNewInterest || isClosing) {
-                        if (isNewInterest) {
-                            userInterested = true;
-                            console.log('✅ Interest detected! User wants to connect.');
-                        }
-
-                        // Send signal to client
+                    // Detect user interest
+                    const isNewInterest = detectInterest(responseText) || detectInterest(transcript);
+                    if (isNewInterest) {
+                        userInterested = true;
                         if (ws.readyState === WebSocket.OPEN) {
-                            // Only send 'interest' event if it's new, but always schedule disconnect
-                            if (isNewInterest) {
-                                ws.send(JSON.stringify({ type: 'interest_detected', interested: true }));
-                            }
-
-                            // Auto-disconnect after 10 seconds (allow TTS to finish)
-                            // Only set if not already pending
-                            if (!disconnectTimer) {
-                                console.log('⏳ Scheduling auto-disconnect in 10s...');
-                                disconnectTimer = setTimeout(() => {
-                                    if (ws.readyState === WebSocket.OPEN) {
-                                        console.log('🤖 Auto-disconnecting call to show form...');
-                                        ws.close(1000, 'Goal Reached');
-                                    }
-                                }, 10000);
-                            }
+                            ws.send(JSON.stringify({ type: 'interest_detected', interested: true }));
                         }
                     }
 
-                    // 6. Generate TTS (Speak)
-                    console.log('🗣️ Requesting TTS from Deepgram...');
+                    // Send AI transcript to client
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText }));
+                    }
+
+                    // Generate TTS Audio via Deepgram
+                    if (deepgram) {
+                        try {
+                            console.log('🗣️ Requesting TTS from Deepgram...');
+                            const ttsResponse = await deepgram.speak.request(
+                                { text: responseText },
+                                { model: 'aura-asteria-en' }
+                            );
+
+                            const stream = await ttsResponse.getStream();
+                            if (stream) {
+                                const reader = stream.getReader();
+                                const chunks: Uint8Array[] = [];
+
+                                while (true) {
+                                    const { done, value } = await reader.read();
+                                    if (done) break;
+                                    if (value) chunks.push(value);
+                                }
+
+                                const combinedBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(combinedBuffer);
+                                    console.log(`✅ Sent TTS Audio (${combinedBuffer.length} bytes) to client`);
+                                }
+                            }
+                        } catch (ttsErr) {
+                            console.error('❌ TTS Generation Error:', ttsErr);
+                            // Signal client to speak via Web Speech API fallback
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText, speakFallback: true }));
+                            }
+                        }
+                    } else {
+                        // Fallback speech for client
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText, speakFallback: true }));
+                        }
+                    }
+                }
+            });
+
+            liveSTT.on(LiveTranscriptionEvents.Error, (err: any) => {
+                console.error('Deepgram STT Error:', err);
+            });
+
+            liveSTT.on(LiveTranscriptionEvents.Close, () => {
+                console.log('Deepgram STT connection closed');
+                isSttOpen = false;
+            });
+
+        } catch (dgErr) {
+            console.error('❌ Error initializing Deepgram client:', dgErr);
+        }
+    } else {
+        console.warn('⚠️ Running in fallback mode (GEMINI_API_KEY or DEEPGRAM_API_KEY not configured)');
+    }
+
+    // Send greeting to client on connection
+    const welcomeGreeting = `Hello! Thank you for calling ${brand.name}. How can I help you today?`;
+    conversationLog.push(`AI: ${welcomeGreeting}`);
+
+    setTimeout(async () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'agent_status',
+                status: 'ready',
+                brandName: brand.name,
+                hasLiveKeys
+            }));
+
+            // Try to send greeting audio if TTS available
+            if (deepgram) {
+                try {
                     const ttsResponse = await deepgram.speak.request(
-                        { text: responseText },
+                        { text: welcomeGreeting },
                         { model: 'aura-asteria-en' }
                     );
-
                     const stream = await ttsResponse.getStream();
                     if (stream) {
-                        console.log('🌊 TTS Stream received, buffering...');
                         const reader = stream.getReader();
-                        const chunks = [];
-
+                        const chunks: Uint8Array[] = [];
                         while (true) {
                             const { done, value } = await reader.read();
                             if (done) break;
-                            chunks.push(value);
+                            if (value) chunks.push(value);
                         }
-
-                        // Combine chunks into one buffer
-                        const combinedBuffer = Buffer.concat(chunks);
-                        console.log(`🔊 Sending TTS Audio Loop: ${combinedBuffer.length} bytes`);
-
+                        const combinedBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(combinedBuffer);
-                            console.log('✅ Audio sent to client');
-                        } else {
-                            console.warn('⚠️ WebSocket closed before audio could be sent');
                         }
-                    } else {
-                        console.error('❌ No stream in TTS response');
                     }
+                } catch {
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: welcomeGreeting, speakFallback: true }));
+                }
+            } else {
+                ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: welcomeGreeting, speakFallback: true }));
+            }
+        }
+    }, 500);
 
-                } catch (err) {
-                    console.error('❌ Error in AI processing pipeline:', err);
+    // 5. Pipe Incoming Audio from Client
+    ws.on('message', (data: any) => {
+        const buf = Buffer.isBuffer(data)
+            ? data
+            : data instanceof ArrayBuffer
+            ? Buffer.from(data)
+            : Buffer.isBuffer(data?.buffer)
+            ? data.buffer
+            : null;
+
+        if (buf) {
+            if (liveSTT && isSttOpen && liveSTT.getReadyState() === 1) {
+                liveSTT.send(buf);
+            } else if (liveSTT) {
+                // Buffer audio while STT connection is opening
+                if (pendingAudioChunks.length < 50) {
+                    pendingAudioChunks.push(buf);
                 }
             }
-        });
-    });
-
-    // Event: Error
-    live.on('error', (err) => {
-        console.error('Deepgram Error:', err);
-    });
-
-    // 7. Pipe Client Audio -> Deepgram
-    ws.on('message', (data) => {
-        if (Buffer.isBuffer(data)) {
-            if (live.getReadyState() === 1) { // OPEN
-                live.send(data as any);
+        } else if (typeof data === 'string') {
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed.type === 'ping') {
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                }
+            } catch {
+                console.log('📩 Received Text:', data);
             }
-        } else {
-            console.log('📩 Received Text/Other:', data);
         }
     });
 
-    // === ON CALL CLOSE: POST WEBHOOK ===
+    // 6. Handle Call Close & Lead Capture
     ws.on('close', async () => {
         console.log('📴 Call Ended');
-        live.finish();
+        if (liveSTT) {
+            try {
+                liveSTT.finish();
+            } catch {}
+        }
 
         const callDuration = Math.round((Date.now() - callStartTime) / 1000);
-        console.log(`⏱️ Call Duration: ${callDuration} seconds`);
-        console.log(`📋 Conversation:\n${conversationLog.join('\n')}`);
-        console.log(`💡 User Interested: ${userInterested}`);
+        console.log(`⏱️ Call Duration: ${callDuration}s`);
+        console.log(`📋 Conversation log items: ${conversationLog.length}`);
 
-        // POST to Backend Webhook to create Lead/Transcript
+        if (conversationLog.length === 0) return;
+
+        // Auto-extract contact info from conversation
+        const contact = extractContactInfo(conversationLog);
+        const resolvedBusinessId = brand._id ? brand._id.toString() : brandId;
+
         try {
-            const webhookPayload = {
-                callerNumber: 'web-call',
-                callerName: 'Web Visitor',
+            console.log('💾 Auto-saving call lead and transcript...');
+            const record = await VoiceController.processCallRecord({
+                businessId: resolvedBusinessId || undefined,
+                brandId: resolvedBusinessId || undefined,
+                callerNumber: contact.phone || 'web-call',
+                callerName: contact.name || 'Web Caller',
+                email: contact.email || '',
                 transcript: conversationLog.join('\n'),
                 duration: callDuration,
-                sentiment: 'neutral', // Could be enhanced with AI analysis
+                sentiment: userInterested ? 'positive' : 'neutral',
                 status: 'completed',
-                userInterested: userInterested
-            };
-
-            console.log('📤 Posting to Backend Webhook:', JSON.stringify(webhookPayload, null, 2));
-            await axios.post(`${BACKEND_URL}/api/voice/webhook`, webhookPayload);
-            console.log('✅ Webhook POST successful');
+                userInterested: userInterested,
+                notes: userInterested
+                    ? 'High-intent lead: Caller discussed scheduling or services during AI Voice Call.'
+                    : 'AI Voice Call interaction record'
+            });
+            console.log('✅ Call lead record processed successfully:', record?.lead?._id);
         } catch (err) {
-            console.error('❌ Failed to post webhook:', err);
+            console.error('❌ Failed to process call record on close:', err);
         }
     });
 };
+

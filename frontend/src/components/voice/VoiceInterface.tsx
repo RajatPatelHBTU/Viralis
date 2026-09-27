@@ -73,18 +73,14 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       setMicPermission(true);
 
       // 2. Connect WebSocket
-      // 2. Connect WebSocket
       let voiceUrl = process.env.NEXT_PUBLIC_VOICE_URL;
 
       // Smart Fallback: Derive WS URL from API URL if explicit Voice URL is missing
       if (!voiceUrl) {
-        // Default to localhost if neither is set
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-        // transform https://.../api -> wss://...
-        // transform http://.../api -> ws://...
         voiceUrl = apiUrl
-          .replace(/^http/, 'ws')       // http->ws, https->wss
-          .replace(/\/api\/?$/, '');    // remove '/api' suffix
+          .replace(/^http/, 'ws')
+          .replace(/\/api\/?$/, '');
       }
 
       console.log('🔌 Connecting to Voice Server:', voiceUrl);
@@ -107,20 +103,23 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
         if (event.data instanceof Blob) {
           // Received Audio Blob from AI
           playAudioBlob(event.data);
-          setIsTalking(true);
-          setTimeout(() => setIsTalking(false), 2000);
         } else if (typeof event.data === 'string') {
-          // Check for JSON signals
           try {
             const msg = JSON.parse(event.data);
-            if (msg.type === 'interest_detected' && msg.interested) {
-              console.log('📩 Interest signal received from server');
-              setUserInterested(true);
-              // Show form immediately so user doesn't have to wait for call to end
-              if (!showLeadForm) {
-                setShowLeadForm(true);
-                toast.success('Interest detected! Form opened.');
+            if (msg.type === 'transcript') {
+              console.log(`[${msg.role || 'ai'}]:`, msg.text);
+              if (msg.speakFallback && 'speechSynthesis' in window && msg.role === 'ai') {
+                const utterance = new SpeechSynthesisUtterance(msg.text);
+                utterance.onstart = () => setIsTalking(true);
+                utterance.onend = () => setIsTalking(false);
+                window.speechSynthesis.speak(utterance);
               }
+            } else if (msg.type === 'interest_detected' && msg.interested) {
+              console.log('📩 Interest detected by agent');
+              setUserInterested(true);
+            } else if (msg.type === 'lead_saved') {
+              setLeadSubmitted(true);
+              toast.success('Your request was logged!');
             }
           } catch {
             console.log('Received text:', event.data);
@@ -131,20 +130,18 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       ws.onerror = (err) => {
         console.error('WebSocket Error', err);
         setStatus('ERROR');
-        toast.error('Connection failed. Please try again.');
+        toast.error('Voice connection issue. Please check server status.');
       };
 
       ws.onclose = () => {
         if (timerIntervalRef.current) {
           clearInterval(timerIntervalRef.current);
         }
-        if (status === 'LIVE') {
-          // Show lead form if user was interested
+        if (status === 'LIVE' || status === 'CONNECTING') {
           if (userInterested) {
-            setShowLeadForm(true);
-            toast.success('Thank you for connecting! Please leave your details.');
+            toast.success('Conversation logged! Our team will reach out.');
           } else {
-            toast.info('Call ended. Thank you!');
+            toast.info('Call ended. Thank you for connecting!');
           }
           setStatus('IDLE');
         }
@@ -153,7 +150,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     } catch (err) {
       console.error('Mic Error', err);
       setStatus('ERROR');
-      toast.error('Microphone access denied or error.');
+      toast.error('Microphone access denied or audio initialization error.');
     }
   };
 
@@ -161,7 +158,9 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     audioContextRef.current = audioContext;
 
-    await audioContext.resume();
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
     console.log(`🎤 Native Sample Rate: ${audioContext.sampleRate}`);
 
     const source = audioContext.createMediaStreamSource(stream);
@@ -215,19 +214,28 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const playAudioBlob = async (blob: Blob) => {
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      if (!audioContextRef.current) return;
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
 
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
+
+      setIsTalking(true);
+      source.onended = () => {
+        setIsTalking(false);
+      };
       source.start(0);
     } catch (e) {
       console.error('Audio Playback Error', e);
+      setIsTalking(false);
     }
   };
-
-
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -235,17 +243,21 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleLeadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLeadSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     try {
-      const response = await fetch('/api/voice/webhook', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const cleanUrl = apiUrl.replace(/\/+$/, '');
+      const response = await fetch(`${cleanUrl}/voice/webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          brandId: brandId,
+          businessId: brandId,
           callerNumber: leadFormData.phone || 'web-form',
           callerName: leadFormData.name || 'Web Visitor',
           email: leadFormData.email,
-          transcript: 'Lead captured via form after voice call',
+          transcript: 'Lead submitted via voice assistant interface',
           duration: callDuration,
           sentiment: 'positive',
           status: 'lead_captured',
@@ -255,7 +267,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
 
       if (response.ok) {
         setLeadSubmitted(true);
-        toast.success('Thank you! We will contact you soon.');
+        toast.success('Thank you! Details submitted successfully.');
       } else {
         toast.error('Failed to submit. Please try again.');
       }
