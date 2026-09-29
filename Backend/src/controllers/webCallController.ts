@@ -140,7 +140,7 @@ Services & Pricing:
 ${servicesList}
 
 Conversational Guidelines:
-- Keep spoken responses natural and concise (1-2 sentences).
+- CRITICAL FOR REAL-TIME VOICE: Keep answers ultra-concise (1 short, direct sentence, max 15 words) so spoken voice streams immediately without any delay.
 - Speak directly and clearly like a real person over a phone call.
 - Provide accurate pricing and info from the facts above; never fabricate details.
 - When the caller wants to book, schedule, purchase, or connect:
@@ -425,11 +425,11 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
                         await triggerUtterance();
                     } else if (isFinal) {
                         accumulatedUtterance = accumulatedUtterance ? `${accumulatedUtterance} ${transcript}`.trim() : transcript;
-                        // Reset silence debounce timer
+                        // Reset silence debounce timer for instantaneous reply
                         if (silenceTimer) clearTimeout(silenceTimer);
                         silenceTimer = setTimeout(() => {
                             triggerUtterance();
-                        }, 1200);
+                        }, 400);
                     }
                 }
             });

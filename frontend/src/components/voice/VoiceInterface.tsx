@@ -76,6 +76,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const sourceRef = useRef<any>(null);
   const recognitionRef = useRef<any>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const fallbackTtsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAiTextRef = useRef<string>('');
   const isTalkingRef = useRef<boolean>(false);
@@ -112,6 +113,10 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     if (fallbackTtsTimerRef.current) {
       clearTimeout(fallbackTtsTimerRef.current);
       fallbackTtsTimerRef.current = null;
+    }
+    if (currentAudioSourceRef.current) {
+      try { currentAudioSourceRef.current.stop(); } catch {}
+      currentAudioSourceRef.current = null;
     }
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
@@ -224,7 +229,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
           if (silenceTimer) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
             dispatchUtterance(interimTranscript);
-          }, 900);
+          }, 350);
         }
       };
 
@@ -309,7 +314,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
                 if (fallbackTtsTimerRef.current) clearTimeout(fallbackTtsTimerRef.current);
                 fallbackTtsTimerRef.current = setTimeout(() => {
                   speakWithBrowser(msg.text);
-                }, 700);
+                }, 400);
               } else if (msg.role === 'user') {
                 setLatestUserTranscript(msg.text);
                 setLatestCaption(msg.text);
@@ -431,31 +436,40 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     }
 
     try {
+      if (currentAudioSourceRef.current) {
+        try { currentAudioSourceRef.current.stop(); } catch {}
+        currentAudioSourceRef.current = null;
+      }
       if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
+        try { currentAudioRef.current.pause(); } catch {}
         currentAudioRef.current = null;
       }
 
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
 
-      audio.onplay = () => setIsTalking(true);
-      audio.onended = () => {
+      const arrayBuffer = await blob.arrayBuffer();
+      // Decode audio data natively with Web Audio API for 0ms latency hardware playback
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer.slice(0));
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+
+      currentAudioSourceRef.current = source;
+      setIsTalking(true);
+
+      source.onended = () => {
         setIsTalking(false);
-        URL.revokeObjectURL(audioUrl);
-      };
-      audio.onerror = () => {
-        setIsTalking(false);
-        URL.revokeObjectURL(audioUrl);
-        if (lastAiTextRef.current) {
-          speakWithBrowser(lastAiTextRef.current);
-        }
+        currentAudioSourceRef.current = null;
       };
 
-      await audio.play();
+      source.start(0);
     } catch (e) {
-      console.warn('Audio element play failed, falling back to speech synthesis:', e);
+      console.warn('Web Audio decode failed, falling back to instant speech synthesis:', e);
       setIsTalking(false);
       if (lastAiTextRef.current) {
         speakWithBrowser(lastAiTextRef.current);
