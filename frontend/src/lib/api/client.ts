@@ -1,14 +1,14 @@
 import axios from 'axios';
 
 const getBaseUrl = () => {
-    // If we have a configured API URL, use it
     let url = process.env.NEXT_PUBLIC_API_URL;
 
-    // Default to live Render backend in production or when not set
-    if (!url) {
-        return process.env.NODE_ENV === 'production'
-            ? 'https://viralis-backend-1q05.onrender.com/api'
-            : 'http://localhost:5000/api';
+    const isRemoteBrowser = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // If url is missing or pointing to localhost while running in production or on a remote domain (Vercel)
+    if (!url || ((isRemoteBrowser || isProduction) && (url.includes('localhost') || url.includes('127.0.0.1') || url.startsWith('/')))) {
+        return 'https://viralis-backend-1q05.onrender.com/api';
     }
 
     // Ensure no trailing slash

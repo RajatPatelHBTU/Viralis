@@ -8,23 +8,22 @@ export const metadata: Metadata = {
   viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0', // Crucial for mobile app feel
 };
 
-// Fetch data directly in Server Component
+function getCleanBackendUrl() {
+  let url = process.env.NEXT_PUBLIC_API_URL;
+  // If not set or pointing to localhost in production/Vercel, use live Render backend
+  if (!url || (process.env.NODE_ENV === 'production' && (url.includes('localhost') || url.includes('127.0.0.1')))) {
+    return 'https://viralis-backend-1q05.onrender.com/api';
+  }
+  if (!url.endsWith('/api')) {
+    url = url.replace(/\/+$/, '') + '/api';
+  }
+  return url;
+}
+
 // Fetch data directly in Server Component
 async function getBrandData(brandId: string) {
   try {
-    let baseUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://127.0.0.1:5000/api');
-
-    // Normalization: Ensure baseUrl ends with '/api'
-    if (!baseUrl.endsWith('/api')) {
-      // Handle cases like 'http://localhost:5000/' or 'http://localhost:5000'
-      baseUrl = baseUrl.replace(/\/+$/, '') + '/api';
-    }
-
-    // Ensure it's absolute for server-side usage
-    if (baseUrl.startsWith('/')) {
-      baseUrl = `http://127.0.0.1:5000${baseUrl}`;
-    }
-
+    const baseUrl = getCleanBackendUrl();
     const apiUrl = `${baseUrl}/public/brand/${brandId}?t=${Date.now()}`;
     console.log(`📡 [Server] Fetching Brand Data from: ${apiUrl}`);
 
@@ -33,33 +32,27 @@ async function getBrandData(brandId: string) {
       next: { revalidate: 0 }
     });
 
-    if (!res.ok) {
-      console.error(`❌ [Server] Brand Fetch Failed: ${res.status} ${res.statusText}`);
-      if (res.status === 404) return null;
-      throw new Error('Failed to fetch brand data');
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`✅ [Server] Brand Data Found: ${data.name}`);
+      return data;
     }
-
-    const data = await res.json();
-    console.log(`✅ [Server] Brand Data Found: ${data.name}`);
-    return data;
   } catch (error) {
-    console.error('Error fetching brand:', error);
-    return null;
+    console.error('Error fetching brand on server:', error);
   }
+
+  // Graceful fallback: return basic profile and let client-side fetch retry seamlessly
+  return {
+    _id: brandId,
+    name: 'AI Voice Assistant',
+    industryMode: 'Business',
+    needsClientFetch: true
+  };
 }
 
 export default async function MeetPage({ params }: { params: Promise<{ brandId: string }> }) {
   const resolvedParams = await params;
   const brand = await getBrandData(resolvedParams.brandId);
-
-  if (!brand) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400 p-6 text-center">
-        <h1 className="text-2xl font-bold text-slate-200 mb-2">Business Not Found</h1>
-        <p>The link you used might be invalid or expired.</p>
-      </div>
-    );
-  }
 
   return (
     <VoiceInterface brand={brand} brandId={resolvedParams.brandId} />

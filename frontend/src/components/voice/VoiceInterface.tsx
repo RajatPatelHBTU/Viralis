@@ -23,10 +23,24 @@ interface VoiceInterfaceProps {
 type ConnectionStatus = 'IDLE' | 'CONNECTING' | 'LIVE' | 'ERROR';
 
 export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) {
+  const [currentBrand, setCurrentBrand] = useState(brand);
   const [status, setStatus] = useState<ConnectionStatus>('IDLE');
   const [micPermission, setMicPermission] = useState<boolean>(false);
   const [isTalking, setIsTalking] = useState(false);
   const [showContact, setShowContact] = useState(false);
+
+  // Auto-fetch fresh brand profile on client if needed
+  useEffect(() => {
+    if (brand?.needsClientFetch || !currentBrand?.name || currentBrand.name === 'AI Voice Assistant') {
+      import('@/lib/api/client').then(({ default: api }) => {
+        api.get(`/public/brand/${brandId}`)
+          .then((res) => {
+            if (res.data) setCurrentBrand(res.data);
+          })
+          .catch(() => {});
+      });
+    }
+  }, [brandId]);
 
   // New State for Lead Capture
   const [showLeadForm, setShowLeadForm] = useState(false);
@@ -74,13 +88,13 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
 
       // 2. Connect WebSocket
       let voiceUrl = process.env.NEXT_PUBLIC_VOICE_URL;
+      const isRemoteBrowser = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
 
-      // Smart Fallback: Derive WS URL from API URL if explicit Voice URL is missing
-      if (!voiceUrl) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
-        voiceUrl = apiUrl
-          .replace(/^http/, 'ws')
-          .replace(/\/api\/?$/, '');
+      // Always use secure Render WebSocket when browsing on a remote domain (like Vercel)
+      if (!voiceUrl || (isRemoteBrowser && (voiceUrl.includes('localhost') || voiceUrl.includes('127.0.0.1')))) {
+        voiceUrl = isRemoteBrowser
+          ? 'wss://viralis-backend-1q05.onrender.com'
+          : 'ws://localhost:5000';
       }
 
       console.log('🔌 Connecting to Voice Server:', voiceUrl);
@@ -289,7 +303,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       <header className="absolute top-0 w-full p-6 flex justify-between items-start z-10">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
-            {brand.name || 'AI Assistant'}
+            {currentBrand?.name || 'AI Assistant'}
           </h1>
           <div className="flex items-center gap-1.5 mt-1">
             <span className="flex h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
