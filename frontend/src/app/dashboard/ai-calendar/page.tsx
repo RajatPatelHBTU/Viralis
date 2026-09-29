@@ -276,22 +276,61 @@ export default function AiCalendarPage() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="platform" className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Platform</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Platform</Label>
+              <Controller
+                name="platform"
+                control={control}
+                render={({ field }) => (
+                  <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-100">
+                    {field.value}
+                  </span>
+                )}
+              />
+            </div>
             <Controller
               name="platform"
               control={control}
               render={({ field }) => (
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <SelectTrigger className="!bg-white border-gray-200 !text-gray-900 h-11 rounded-lg"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Instagram">Instagram</SelectItem>
-                    <SelectItem value="Instagram Reels">Instagram Reels</SelectItem>
-                    <SelectItem value="Facebook">Facebook</SelectItem>
-                    <SelectItem value="LinkedIn">LinkedIn</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "Instagram", name: "Instagram", sub: "Feed & Carousel", icon: "📸" },
+                    { id: "Instagram Reels", name: "Reels", sub: "Viral Short Video", icon: "🎬" },
+                    { id: "Facebook", name: "Facebook", sub: "Community Post", icon: "📘" },
+                    { id: "LinkedIn", name: "LinkedIn", sub: "B2B & Thought Lead", icon: "💼" },
+                  ].map((p) => {
+                    const isSelected = field.value === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => field.onChange(p.id)}
+                        className={cn(
+                          "relative flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all active:scale-[0.98] cursor-pointer",
+                          isSelected
+                            ? "border-slate-900 bg-slate-900 text-white shadow-md ring-1 ring-slate-900"
+                            : "border-gray-200 bg-white text-gray-900 hover:border-gray-300 hover:bg-gray-50"
+                        )}
+                      >
+                        <span className="text-xl shrink-0">{p.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className={cn("text-xs font-bold leading-tight truncate", isSelected ? "text-white" : "text-gray-900")}>
+                            {p.name}
+                          </p>
+                          <p className={cn("text-[10px] leading-tight truncate mt-0.5", isSelected ? "text-gray-300" : "text-gray-500")}>
+                            {p.sub}
+                          </p>
+                        </div>
+                        {isSelected && (
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 absolute top-2 right-2 ring-2 ring-white/30" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             />
+            {errors.platform && <p className="text-red-500 text-xs">{errors.platform.message}</p>}
           </div>
 
           <div className="space-y-2">

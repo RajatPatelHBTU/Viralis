@@ -49,38 +49,101 @@ function buildPrompt(input) {
     }
   `;
 }
+const CANDIDATE_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash"
+];
+function generateFallbackVariations(input) {
+    const { niche, platform, city, description, brandName, date } = input;
+    const brand = brandName || 'Viralis Studio';
+    const cleanCity = city || 'your city';
+    const cleanNiche = niche || 'lifestyle';
+    const isReel = platform.toLowerCase().includes('reel');
+    const contextPrefix = description ? `${description}\n\n` : '';
+    return {
+        viral: {
+            day: (date || 1),
+            hook: `Stop making this huge ${cleanNiche} mistake in ${cleanCity}! 🛑`,
+            caption: `${contextPrefix}90% of people in ${cleanCity} get this completely wrong when starting out with ${cleanNiche}.\n\nHere is the real truth nobody talks about: focus on smart consistency, not burnout.\n\nSave this post so you don't forget it later! Tag someone who needs this wakeup call. 👇`,
+            hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, `#${cleanCity.replace(/\s+/g, '')}Vibes`, '#ViralReel', '#TrendingNow', '#LifeHacks', '#ViralisAI'],
+            post_type: isReel ? 'reel' : 'carousel',
+            best_time: '7:30 PM - 9:00 PM',
+            cta: `Comment "${cleanNiche.toUpperCase()}" below and we'll DM you our private checklist!`,
+            visual_prompt: `High-energy dynamic visual highlighting the common mistake vs the right technique in ${cleanCity}.`,
+            script: `Hook: You are probably doing this wrong every single day. Here is what actually works in 3 easy steps.`
+        },
+        reach: {
+            day: 1,
+            hook: `3 simple hacks to level up your ${cleanNiche} journey in ${cleanCity} 🚀`,
+            caption: `Small daily adjustments create massive compound results.\n\n1. Master the fundamentals before chasing trends\n2. Track your weekly milestones\n3. Join a supportive community at ${brand}\n\nDouble tap if you are ready to make serious progress this week! 💯`,
+            hashtags: [`#${cleanNiche.replace(/\s+/g, '')}Tips`, `#${cleanCity.replace(/\s+/g, '')}`, '#GrowthMindset', '#DailyRoutine', '#SuccessHacks', '#ProTips'],
+            post_type: 'carousel',
+            best_time: '12:30 PM - 2:00 PM',
+            cta: 'Save this post to review during your next routine session!',
+            visual_prompt: `Clean, multi-slide aesthetic carousel with bold typography and step-by-step pointers.`,
+            script: `Three simple things I wish I knew when I first started in ${cleanCity}.`
+        },
+        niche: {
+            day: 1,
+            hook: `The ultimate deep-dive breakdown for ${cleanNiche} enthusiasts in ${cleanCity} 📊`,
+            caption: `Let's break down the technical side of ${cleanNiche} that separates beginners from experts.\n\nAt ${brand}, we prioritize proven methodology and measurable results. Here are the core metrics and benchmarks you should be watching closely.\n\nWhat is your biggest hurdle right now? Let's discuss in the comments below!`,
+            hashtags: [`#${cleanNiche.replace(/\s+/g, '')}Community`, `#${cleanCity.replace(/\s+/g, '')}Pros`, '#DeepDive', '#Mastery', '#ProGuidance', '#IndustrySecrets'],
+            post_type: 'static',
+            best_time: '9:00 AM - 10:30 AM',
+            cta: 'Share your thoughts in the comments or send us a DM for a personalized roadmap!',
+            visual_prompt: `Minimalist, authoritative infographic highlighting key benchmarks and structured guidelines.`,
+            script: `A step-by-step masterclass on optimizing your ${cleanNiche} performance.`
+        }
+    };
+}
+function generateFallbackCalendar(input) {
+    const { niche, platform, city, brandName } = input;
+    const cleanNiche = niche || 'business';
+    const cleanCity = city || 'your city';
+    const isReel = platform.toLowerCase().includes('reel');
+    const calendar = [];
+    for (let i = 1; i <= 30; i++) {
+        calendar.push({
+            day: i,
+            hook: `Day ${i}: Proven ${cleanNiche} breakthrough in ${cleanCity} 🔥`,
+            caption: `Consistency is the secret weapon of high achievers in ${cleanCity}. Today we're breaking down actionable tactic #${i} to help you grow with ${brandName || 'our brand'}.\n\nDrop a comment if you are with us!`,
+            hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, `#${cleanCity.replace(/\s+/g, '')}`, '#DailyGrowth', '#ViralisAI', '#Trending'],
+            post_type: isReel ? (i % 2 === 0 ? 'reel' : 'carousel') : (i % 3 === 0 ? 'carousel' : 'static'),
+            best_time: '6:00 PM - 8:00 PM',
+            cta: 'Tap follow for daily actionable insights!',
+            visual_prompt: `Bold, eye-catching visual showcasing tip #${i} with high contrast layout.`
+        });
+    }
+    return calendar;
+}
 /**
- * Generates a 30-day social media calendar using the Gemini API.
- * @param input - The user's requirements for the calendar.
- * @returns A promise that resolves to an array of 30 DayPost objects.
+ * Generates a 30-day social media calendar using the Gemini API with fallback.
  */
 async function generate30DayCalendar(input) {
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
     const prompt = buildPrompt(input);
-    try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-        // Extract the JSON array from the response text, which might be wrapped in markdown
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) {
-            throw new Error("Failed to extract JSON array from Gemini response.");
+    for (const modelName of CANDIDATE_MODELS) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text();
+            const jsonMatch = text.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+                const parsedJson = JSON.parse(jsonMatch[0]);
+                if (Array.isArray(parsedJson) && parsedJson.length === 30) {
+                    console.log(`✅ Generated 30-day calendar using ${modelName}`);
+                    return parsedJson;
+                }
+            }
         }
-        const parsedJson = JSON.parse(jsonMatch[0]);
-        if (!Array.isArray(parsedJson) || parsedJson.length !== 30) {
-            throw new Error(`Validation failed: Expected 30 items, but got ${parsedJson.length}.`);
+        catch (err) {
+            console.warn(`Model ${modelName} calendar generation failed: ${err.message}. Trying next model...`);
         }
-        // Simple validation of the first item to increase confidence
-        const firstItem = parsedJson[0];
-        if (!firstItem.day || !firstItem.hook || !firstItem.caption) {
-            throw new Error("Validation failed: The first item in the array has a missing property.");
-        }
-        return parsedJson;
     }
-    catch (error) {
-        console.error("Error generating content with Gemini:", error);
-        throw new Error("Failed to generate content from AI service.");
-    }
+    console.warn("Using fallback calendar generator due to AI service limits.");
+    return generateFallbackCalendar(input);
 }
 function buildDailyPrompt(input) {
     const { niche, platform, city, description, brandName, date, context } = input;
@@ -105,7 +168,7 @@ function buildDailyPrompt(input) {
     3. "Niche Special": Deep dive, industry specific, educational or authority-building, aimed at high engagement from core audience.
 
     OUTPUT FORMAT:
-    Return ONLY a valid JSON object with keys "viral", "reach", and "niche". Do not include markdown. Structure:
+    Return ONLY a valid JSON object with keys "viral", "reach", and "niche". Do not include markdown codeblocks or preamble. Structure:
     {
       "viral": {
         "day": "${date}",
@@ -124,22 +187,27 @@ function buildDailyPrompt(input) {
   `;
 }
 async function generateDailyPost(input) {
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
     const prompt = buildDailyPrompt(input);
-    try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            throw new Error("Failed to extract JSON object from Gemini response.");
+    for (const modelName of CANDIDATE_MODELS) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const parsedJson = JSON.parse(jsonMatch[0]);
+                if (parsedJson.viral && parsedJson.reach && parsedJson.niche) {
+                    console.log(`✅ Generated daily post variations using ${modelName}`);
+                    return parsedJson;
+                }
+            }
         }
-        const parsedJson = JSON.parse(jsonMatch[0]);
-        return parsedJson;
+        catch (error) {
+            console.warn(`Model ${modelName} failed for daily post: ${error.message}. Trying next candidate...`);
+        }
     }
-    catch (error) {
-        console.error("Error generating daily content with Gemini:", error);
-        throw new Error("Failed to generate daily content from AI service.");
-    }
+    console.warn("Using smart fallback post variations generator.");
+    return generateFallbackVariations(input);
 }
 //# sourceMappingURL=aiContentService.js.map

@@ -16,9 +16,7 @@ export interface CalendarInput {
     brandName?: string;
 }
 /**
- * Generates a 30-day social media calendar using the Gemini API.
- * @param input - The user's requirements for the calendar.
- * @returns A promise that resolves to an array of 30 DayPost objects.
+ * Generates a 30-day social media calendar using the Gemini API with fallback.
  */
 export declare function generate30DayCalendar(input: CalendarInput): Promise<DayPost[]>;
 export interface DailyPostInput extends CalendarInput {
