@@ -239,19 +239,21 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
     let liveSTT: any = null;
     const pendingAudioChunks: Buffer[] = [];
     let isSttOpen = false;
+    let accumulatedUtterance = '';
+    let silenceTimer: NodeJS.Timeout | null = null;
 
     // Handler for processing user speech from any source (Deepgram STT or Browser STT)
     let isProcessingUtterance = false;
     let lastProcessedTranscript = '';
     let lastProcessedAt = 0;
 
-    const handleUserUtterance = async (rawText: string) => {
+    const handleUserUtterance = async (rawText: string, force: boolean = false) => {
         const transcript = rawText.trim();
         if (!transcript || transcript.length < 2) return;
 
         const now = Date.now();
-        // Prevent duplicate processing of the same phrase within 2.5 seconds
-        if (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500)) {
+        // Prevent duplicate processing unless explicitly forced by Pause to Reply
+        if (!force && (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500))) {
             return;
         }
 
@@ -399,9 +401,6 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
                 }
             });
 
-            let accumulatedUtterance = '';
-            let silenceTimer: NodeJS.Timeout | null = null;
-
             const triggerUtterance = async () => {
                 if (silenceTimer) {
                     clearTimeout(silenceTimer);
@@ -511,6 +510,20 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
 
                     if (parsed.type === 'ping') {
                         ws.send(JSON.stringify({ type: 'pong' }));
+                    } else if (parsed.type === 'force_reply' || parsed.type === 'pause_reply') {
+                        console.log('⚡ Client tapped Pause to Reply, text:', parsed.text);
+                        if (silenceTimer) clearTimeout(silenceTimer);
+                        const query = (parsed.text || accumulatedUtterance || '').trim();
+                        accumulatedUtterance = '';
+                        if (query.length > 1) {
+                            await handleUserUtterance(query, true);
+                        } else {
+                            await handleUserUtterance("Could you tell me more about what you offer?", true);
+                        }
+                    } else if (parsed.type === 'start_listening') {
+                        console.log('🎙️ Client switched to listening mode');
+                        accumulatedUtterance = '';
+                        if (silenceTimer) clearTimeout(silenceTimer);
                     } else if ((parsed.type === 'user_speech' || parsed.type === 'speech' || parsed.type === 'transcript') && parsed.text) {
                         console.log(`🎤 Received speech from client: "${parsed.text}"`);
                         await handleUserUtterance(parsed.text);

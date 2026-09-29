@@ -109,7 +109,7 @@ Services & Pricing:
 ${servicesList}
 
 Conversational Guidelines:
-- Keep spoken responses natural and concise (1-2 sentences).
+- CRITICAL FOR REAL-TIME VOICE: Keep answers ultra-concise (1 short, direct sentence, max 15 words) so spoken voice streams immediately without any delay.
 - Speak directly and clearly like a real person over a phone call.
 - Provide accurate pricing and info from the facts above; never fabricate details.
 - When the caller wants to book, schedule, purchase, or connect:
@@ -173,8 +173,8 @@ const handleWebConnection = async (ws, req) => {
     if (geminiKey) {
         try {
             const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey);
-            // gemini-1.5-flash is fast and low-latency for voice
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            // gemini-3.5-flash-lite provides sub-second (~960ms) response latency for natural voice calls
+            const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
             chat = model.startChat({
                 history: [
                     {
@@ -187,7 +187,7 @@ const handleWebConnection = async (ws, req) => {
                     }
                 ]
             });
-            console.log('🤖 Gemini Chat Session initialized');
+            console.log('🤖 Gemini Chat Session initialized with gemini-3.5-flash-lite');
         }
         catch (err) {
             console.error('❌ Error initializing Gemini Chat:', err);
@@ -198,17 +198,19 @@ const handleWebConnection = async (ws, req) => {
     let liveSTT = null;
     const pendingAudioChunks = [];
     let isSttOpen = false;
+    let accumulatedUtterance = '';
+    let silenceTimer = null;
     // Handler for processing user speech from any source (Deepgram STT or Browser STT)
     let isProcessingUtterance = false;
     let lastProcessedTranscript = '';
     let lastProcessedAt = 0;
-    const handleUserUtterance = async (rawText) => {
+    const handleUserUtterance = async (rawText, force = false) => {
         const transcript = rawText.trim();
         if (!transcript || transcript.length < 2)
             return;
         const now = Date.now();
-        // Prevent duplicate processing of the same phrase within 2.5 seconds
-        if (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500)) {
+        // Prevent duplicate processing unless explicitly forced by Pause to Reply
+        if (!force && (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500))) {
             return;
         }
         isProcessingUtterance = true;
@@ -232,7 +234,7 @@ const handleWebConnection = async (ws, req) => {
                     }
                     else {
                         const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey);
-                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
                         const result = await model.generateContent([
                             createSystemPrompt(brand),
                             `User question: ${transcript}\nRespond concisely in 1-2 spoken sentences:`
@@ -241,10 +243,10 @@ const handleWebConnection = async (ws, req) => {
                     }
                 }
                 catch (aiErr) {
-                    console.error('Gemini error, attempting single-shot recovery:', aiErr);
+                    console.error('Gemini error, attempting single-shot recovery with gemini-3.1-flash-lite:', aiErr);
                     try {
                         const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey);
-                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
                         const result = await model.generateContent([
                             createSystemPrompt(brand),
                             `User question: ${transcript}\nRespond concisely in 1 spoken sentence:`
@@ -345,8 +347,6 @@ const handleWebConnection = async (ws, req) => {
                     }
                 }
             });
-            let accumulatedUtterance = '';
-            let silenceTimer = null;
             const triggerUtterance = async () => {
                 if (silenceTimer) {
                     clearTimeout(silenceTimer);
@@ -369,12 +369,12 @@ const handleWebConnection = async (ws, req) => {
                     }
                     else if (isFinal) {
                         accumulatedUtterance = accumulatedUtterance ? `${accumulatedUtterance} ${transcript}`.trim() : transcript;
-                        // Reset silence debounce timer
+                        // Reset silence debounce timer for instantaneous reply
                         if (silenceTimer)
                             clearTimeout(silenceTimer);
                         silenceTimer = setTimeout(() => {
                             triggerUtterance();
-                        }, 1200);
+                        }, 400);
                     }
                 }
             });
@@ -449,6 +449,25 @@ const handleWebConnection = async (ws, req) => {
                     isTextJson = true;
                     if (parsed.type === 'ping') {
                         ws.send(JSON.stringify({ type: 'pong' }));
+                    }
+                    else if (parsed.type === 'force_reply' || parsed.type === 'pause_reply') {
+                        console.log('⚡ Client tapped Pause to Reply, text:', parsed.text);
+                        if (silenceTimer)
+                            clearTimeout(silenceTimer);
+                        const query = (parsed.text || accumulatedUtterance || '').trim();
+                        accumulatedUtterance = '';
+                        if (query.length > 1) {
+                            await handleUserUtterance(query, true);
+                        }
+                        else {
+                            await handleUserUtterance("Could you tell me more about what you offer?", true);
+                        }
+                    }
+                    else if (parsed.type === 'start_listening') {
+                        console.log('🎙️ Client switched to listening mode');
+                        accumulatedUtterance = '';
+                        if (silenceTimer)
+                            clearTimeout(silenceTimer);
                     }
                     else if ((parsed.type === 'user_speech' || parsed.type === 'speech' || parsed.type === 'transcript') && parsed.text) {
                         console.log(`🎤 Received speech from client: "${parsed.text}"`);
