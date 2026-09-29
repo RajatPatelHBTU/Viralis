@@ -11,6 +11,7 @@ coverage
 out/
 build/
 dist/
+/public/
 
 # Misc
 .DS_Store
