@@ -77,7 +77,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
 
       // Smart Fallback: Derive WS URL from API URL if explicit Voice URL is missing
       if (!voiceUrl) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
         voiceUrl = apiUrl
           .replace(/^http/, 'ws')
           .replace(/\/api\/?$/, '');
@@ -246,7 +246,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const handleLeadSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
       const cleanUrl = apiUrl.replace(/\/+$/, '');
       const response = await fetch(`${cleanUrl}/voice/webhook`, {
         method: 'POST',

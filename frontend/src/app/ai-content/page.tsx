@@ -23,7 +23,8 @@ export default function AIContentPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/ai-content', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
+      const response = await fetch(`${apiUrl}/ai-content`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),

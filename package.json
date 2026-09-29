@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --prefix frontend",
+    "dev:all": "npx concurrently -k -n \"BACKEND,FRONTEND\" -c \"blue,green\" \"npm run dev --prefix Backend\" \"npm run dev --prefix frontend\"",
     "build": "node scripts/build-vercel.js",
     "start": "npm run start --prefix frontend",
     "dev:backend": "npm run dev --prefix Backend",

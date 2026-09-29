@@ -49,8 +49,16 @@ export const useAuthStore = create<AuthState>((set) => ({
             localStorage.setItem('token', token);
             set({ token, user, isLoading: false });
         } catch (error: any) {
+            let message = error.response?.data?.error;
+            if (!message) {
+                if (error.code === 'ERR_NETWORK' || !error.response) {
+                    message = 'Backend server is not reachable. Ensure the backend is running on port 5000.';
+                } else {
+                    message = 'Login failed. Please check your credentials.';
+                }
+            }
             set({
-                error: error.response?.data?.error || 'Login failed',
+                error: message,
                 isLoading: false
             });
             throw error;
@@ -66,8 +74,16 @@ export const useAuthStore = create<AuthState>((set) => ({
             localStorage.setItem('token', token);
             set({ token, user, isLoading: false });
         } catch (error: any) {
+            let message = error.response?.data?.error;
+            if (!message) {
+                if (error.code === 'ERR_NETWORK' || !error.response) {
+                    message = 'Backend server is not reachable. Ensure the backend is running on port 5000.';
+                } else {
+                    message = 'Registration failed. Please try again.';
+                }
+            }
             set({
-                error: error.response?.data?.error || 'Registration failed',
+                error: message,
                 isLoading: false
             });
             throw error;

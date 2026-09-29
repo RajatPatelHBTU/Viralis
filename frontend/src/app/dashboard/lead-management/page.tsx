@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Filter, Eye, Heart, TrendingUp, Plus, Search, Mail, Phone, MoreVertical, ExternalLink, RefreshCw } from "lucide-react";
 import { useLeadStore, InstagramMedia, VideoAnalysis, Lead } from '@/lib/store/leadStore';
+import api from '@/lib/api/client';
 
 // Types are now imported from @/lib/store/leadStore indirectly or used within the store
 
@@ -42,19 +43,10 @@ export default function LeadManagement() {
     const handleCreateLead = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const response = await fetch('http://localhost:5000/api/leads', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                },
-                body: JSON.stringify(newLead)
-            });
-            if (response.ok) {
-                setIsAddModalOpen(false);
-                setNewLead({ name: '', email: '', phone: '', source: 'Manual', status: 'new' });
-                fetchLeads();
-            }
+            await api.post('/leads', newLead);
+            setIsAddModalOpen(false);
+            setNewLead({ name: '', email: '', phone: '', source: 'Manual', status: 'new' });
+            fetchLeads();
         } catch (error) {
             console.error('Error creating lead:', error);
         }
@@ -62,17 +54,8 @@ export default function LeadManagement() {
 
     const updateLeadStatus = async (id: string, newStatus: string) => {
         try {
-            const response = await fetch(`http://localhost:5000/api/leads/${id}`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                },
-                body: JSON.stringify({ status: newStatus })
-            });
-            if (response.ok) {
-                fetchLeads();
-            }
+            await api.patch(`/leads/${id}`, { status: newStatus });
+            fetchLeads();
         } catch (error) {
             console.error('Error updating status:', error);
         }

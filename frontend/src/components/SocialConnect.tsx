@@ -41,7 +41,7 @@ export function SocialConnect() {
 
         // Use the configured baseURL from the axio instance + /auth/provider
         // This ensures we use the same URL that API calls usage.
-        const backendUrl = api.defaults.baseURL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const backendUrl = api.defaults.baseURL || process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
 
         // Ensure no double slashes if baseURL ends with / (axios usually doesn't, but good to be safe)
         const cleanBaseUrl = backendUrl.replace(/\/+$/, '');

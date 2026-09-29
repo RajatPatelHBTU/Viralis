@@ -4,9 +4,11 @@ const getBaseUrl = () => {
     // If we have a configured API URL, use it
     let url = process.env.NEXT_PUBLIC_API_URL;
 
-    // Default to local backend if not set
+    // Default to live Render backend in production or when not set
     if (!url) {
-        return 'http://localhost:5000/api';
+        return process.env.NODE_ENV === 'production'
+            ? 'https://viralis-backend-1q05.onrender.com/api'
+            : 'http://localhost:5000/api';
     }
 
     // Ensure no trailing slash

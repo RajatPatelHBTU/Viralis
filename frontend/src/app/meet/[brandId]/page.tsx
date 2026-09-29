@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // Fetch data directly in Server Component
 async function getBrandData(brandId: string) {
   try {
-    let baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000/api';
+    let baseUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://127.0.0.1:5000/api');
 
     // Normalization: Ensure baseUrl ends with '/api'
     if (!baseUrl.endsWith('/api')) {

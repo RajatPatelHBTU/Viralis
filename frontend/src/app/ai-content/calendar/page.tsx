@@ -30,7 +30,8 @@ export default function CalendarPage() {
 
     try {
       // Step 1: Get 30-day text plan
-      const res = await fetch('http://localhost:5000/api/ai-content/calendar', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://viralis-backend-1q05.onrender.com/api' : 'http://localhost:5000/api');
+      const res = await fetch(`${apiUrl}/ai-content/calendar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
