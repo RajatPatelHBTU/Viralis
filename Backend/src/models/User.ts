@@ -27,6 +27,8 @@ export interface IUser extends Document {
         };
     };
     comparePassword(candidate: string): Promise<boolean>;
+    resetPasswordToken?: string;
+    resetPasswordExpires?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -40,6 +42,8 @@ const userSchema = new Schema<IUser>(
         avatar: { type: String }, // Optional custom avatar URL
         role: { type: String, enum: ['admin', 'user'], default: 'user' },
         businessId: { type: Schema.Types.ObjectId, ref: 'Business', required: true },
+        resetPasswordToken: { type: String, select: false },
+        resetPasswordExpires: { type: Date, select: false },
         socialAccounts: {
             youtube: {
                 accessToken: String,
