@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Define the shape of a single day's post
 export interface DayPost {
-  day: number;
+  day: number | string;
   hook: string;
   caption: string;
   hashtags: string[];
@@ -10,6 +10,8 @@ export interface DayPost {
   best_time: string;
   cta: string;
   visual_prompt: string;
+  platform?: string;
+  script?: string;
 }
 
 // Input shape for the generation function
@@ -118,7 +120,54 @@ function generateFallbackVariations(input: DailyPostInput): PostVariations {
       cta: 'Share your thoughts in the comments or send us a DM for a personalized roadmap!',
       visual_prompt: `Minimalist, authoritative infographic highlighting key benchmarks and structured guidelines.`,
       script: `A step-by-step masterclass on optimizing your ${cleanNiche} performance.`
-    } as any
+    } as any,
+    platformPosts: {
+      instagram: {
+        day: (date || 1) as any,
+        platform: 'Instagram',
+        hook: `The exact 5-step blueprint to master ${cleanNiche} in ${cleanCity} 📸`,
+        caption: `${contextPrefix}Swipe through to discover how top performers approach ${cleanNiche} without getting overwhelmed.\n\nSlide 1: The core misconception\nSlide 2: What to eliminate this week\nSlide 3: The daily 15-minute protocol\nSlide 4: Key metric checklist\nSlide 5: Action summary\n\nDrop a ❤️ and save this post for your next session!`,
+        hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, `#${cleanCity.replace(/\s+/g, '')}Creators`, '#InstagramGrowth', '#CarouselPost', '#ViralContent', '#InstaTips'],
+        post_type: 'carousel',
+        best_time: '11:00 AM - 1:00 PM',
+        cta: 'Bookmark this carousel to revisit anytime!',
+        visual_prompt: `5-slide seamless carousel design: Slide 1 bold headline with gradient background, Slides 2-4 clean infographics with bullet points, Slide 5 bold CTA banner.`
+      },
+      reels: {
+        day: (date || 1) as any,
+        platform: 'Instagram Reels',
+        hook: `POV: You stopped doing random ${cleanNiche} routines in ${cleanCity} and tried this instead 🎬`,
+        caption: `Stop overcomplicating your progress! This 30-second breakdown is the secret.\n\nTrending audio recommendation: Fast upbeat lofi beat.\n\nTag your workout/accountability partner below! 👇`,
+        hashtags: [`#${cleanNiche.replace(/\s+/g, '')}Reel`, `#${cleanCity.replace(/\s+/g, '')}Fitness`, '#ReelsTrending', '#ViralAudio', '#ReelOfTheDay', '#FYP'],
+        post_type: 'reel',
+        best_time: '6:30 PM - 8:30 PM',
+        cta: 'Follow for daily high-impact reels!',
+        visual_prompt: `Dynamic 9:16 vertical video. Fast transitions every 2.5 seconds with prominent neon on-screen subtitles and b-roll action footage.`,
+        script: `[0-3s Hook]: Stop scrolling if you do ${cleanNiche} in ${cleanCity}!\n[3-10s The Flaw]: 90% of people focus on the wrong variable and waste months.\n[10-20s The Shift]: Here is what you should do instead starting today.\n[20-30s CTA]: Try this for 7 days and see the difference. Follow for more daily routines!`
+      },
+      facebook: {
+        day: (date || 1) as any,
+        platform: 'Facebook',
+        hook: `Quick question for our ${cleanCity} community: what's your biggest hurdle with ${cleanNiche}? 💬`,
+        caption: `${contextPrefix}We were talking with several members here in ${cleanCity} this week, and one common theme kept coming up: staying consistent when life gets busy.\n\nHere are 3 small habits that make a world of difference:\n1. Schedule your sessions like non-negotiable appointments.\n2. Keep your prep routine under 5 minutes.\n3. Celebrate small weekly wins instead of waiting for months.\n\nWe'd love to hear your perspective — how do you handle busy days? Drop your thoughts below! 👇`,
+        hashtags: [`#${cleanCity}Community`, `#${cleanNiche.replace(/\s+/g, '')}Discussion`, '#CommunityFirst', '#LocalBusiness', '#DailyInspiration'],
+        post_type: 'static',
+        best_time: '1:00 PM - 3:00 PM',
+        cta: 'Join the conversation in the comments below!',
+        visual_prompt: `Authentic, relatable photo of real community members in ${cleanCity} engaged in session or workshop.`
+      },
+      linkedin: {
+        day: (date || 1) as any,
+        platform: 'LinkedIn',
+        hook: `Most people treat ${cleanNiche} as a hobby. The top 1% treat it as an optimization system. 💼`,
+        caption: `${contextPrefix}Over the past year analyzing performance in ${cleanCity}, one pattern stands out clearly:\n\nSuccess isn't about brute force. It's about systemic execution.\n\n📌 3 Core Takeaways:\n• Inputs matter more than outcomes: Focus on daily cadence.\n• Friction reduction: Remove decision fatigue before you start.\n• Feedback loops: What gets measured gets managed.\n\nThe framework is simple, but execution requires discipline.\n\nAgree or disagree? What's your framework for sustainable progress?\n\n♻️ Repost if you found this perspective insightful.`,
+        hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, '#Leadership', '#SystemicThinking', '#Productivity', '#ProfessionalGrowth', '#B2BStrategy'],
+        post_type: 'carousel',
+        best_time: '8:00 AM - 10:00 AM',
+        cta: 'Follow for weekly strategic breakdowns and repost to your network.',
+        visual_prompt: `Minimalist, dark-mode PDF document presentation slide deck. Clean Swiss typography with structured bullet icons and executive color palette.`
+      }
+    }
   };
 }
 
@@ -188,6 +237,12 @@ export interface PostVariations {
   viral: DayPost;
   reach: DayPost;
   niche: DayPost;
+  platformPosts?: {
+    instagram: DayPost;
+    reels: DayPost;
+    facebook: DayPost;
+    linkedin: DayPost;
+  };
 }
 
 function buildDailyPrompt(input: DailyPostInput): string {
@@ -195,7 +250,7 @@ function buildDailyPrompt(input: DailyPostInput): string {
 
   return `
     You are VIRALIS AI, an expert social media content strategist.
-    Your task is to generate THREE distinct social media post variations for a specific date, tailored to the brand's positioning and recent performance.
+    Your task is to generate social media post strategy variations AND platform-specific posts for a specific date, tailored to the brand's positioning and recent performance.
 
     INPUTS:
     - Target Date: "${date}"
@@ -208,13 +263,19 @@ function buildDailyPrompt(input: DailyPostInput): string {
     - Brand Positioning: "${context.brandPositioning}"
     - Recent Performance: "${context.recentStats}"
 
-    GENERATE 3 VARIATIONS:
-    1. "Viral Factor": High energy, controversial or surprising hook, short & punchy caption, aimed at maximum shareability.
-    2. "Most Reach": Broad appeal, relatable content, uses trending audio/concepts, aimed at new eyeballs.
-    3. "Niche Special": Deep dive, industry specific, educational or authority-building, aimed at high engagement from core audience.
+    GENERATE:
+    1. 3 Strategy Variations:
+       - "viral": High energy, controversial or surprising hook, short & punchy caption.
+       - "reach": Broad appeal, relatable content, uses trending audio/concepts.
+       - "niche": Deep dive, industry specific, educational authority.
+    2. 4 Tailored Platform Posts in "platformPosts":
+       - "instagram": Optimized for Instagram Feed & multi-slide Carousel.
+       - "reels": High-impact 30s video script with visual cues and audio prompt.
+       - "facebook": Conversational, community discussion starter.
+       - "linkedin": Professional authority, formatted with clear bullets and strategic takeaways.
 
     OUTPUT FORMAT:
-    Return ONLY a valid JSON object with keys "viral", "reach", and "niche". Do not include markdown codeblocks or preamble. Structure:
+    Return ONLY a valid JSON object with keys "viral", "reach", "niche", and "platformPosts". Do not include markdown codeblocks or preamble. Structure:
     {
       "viral": {
         "day": "${date}",
@@ -228,7 +289,13 @@ function buildDailyPrompt(input: DailyPostInput): string {
         "script": "string"
       },
       "reach": { ...same structure },
-      "niche": { ...same structure }
+      "niche": { ...same structure },
+      "platformPosts": {
+        "instagram": { ...same structure },
+        "reels": { ...same structure, "script": "string" },
+        "facebook": { ...same structure },
+        "linkedin": { ...same structure }
+      }
     }
   `;
 }

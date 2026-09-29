@@ -1,5 +1,5 @@
 export interface DayPost {
-    day: number;
+    day: number | string;
     hook: string;
     caption: string;
     hashtags: string[];
@@ -7,6 +7,8 @@ export interface DayPost {
     best_time: string;
     cta: string;
     visual_prompt: string;
+    platform?: string;
+    script?: string;
 }
 export interface CalendarInput {
     niche: string;
@@ -31,6 +33,12 @@ export interface PostVariations {
     viral: DayPost;
     reach: DayPost;
     niche: DayPost;
+    platformPosts?: {
+        instagram: DayPost;
+        reels: DayPost;
+        facebook: DayPost;
+        linkedin: DayPost;
+    };
 }
 export declare function generateDailyPost(input: DailyPostInput): Promise<PostVariations>;
 //# sourceMappingURL=aiContentService.d.ts.map

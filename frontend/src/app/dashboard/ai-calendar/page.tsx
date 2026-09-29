@@ -5,7 +5,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { useForm, SubmitHandler, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { DayPost } from "@/lib/types/aiContent";
+import { DayPost, PostVariations } from "@/lib/types/aiContent";
 import api from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { RocketIcon, AlertCircle, Sparkles, Calendar as CalendarIcon, Save, Copy, BarChart3, Zap, Target } from "lucide-react";
+import { RocketIcon, AlertCircle, Sparkles, Calendar as CalendarIcon, Save, Copy, BarChart3, Zap, Target, Video, Film, Share2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -36,12 +36,6 @@ const formSchema = z.object({
 });
 
 type FormValues = z.infer<typeof formSchema>;
-
-interface PostVariations {
-  viral: DayPost;
-  reach: DayPost;
-  niche: DayPost;
-}
 
 // --- Components ---
 
@@ -98,7 +92,7 @@ function PostCard({ post, type, onSave, isSaving }: { post: DayPost; type: 'vira
 
         <div className="flex flex-wrap gap-1.5 pt-1">
           {post.hashtags.map(tag => (
-            <span key={tag} className="text-xs text-blue-600/80 bg-blue-50 px-2 py-1 rounded-md">#{tag}</span>
+            <span key={tag} className="text-xs text-blue-600/80 bg-blue-50 px-2 py-1 rounded-md">#{tag.replace(/^#/, '')}</span>
           ))}
         </div>
 
@@ -125,6 +119,176 @@ function PostCard({ post, type, onSave, isSaving }: { post: DayPost; type: 'vira
   );
 }
 
+function PlatformPostCard({
+  post,
+  platformKey,
+  onSave,
+  isSaving,
+}: {
+  post: DayPost;
+  platformKey: 'instagram' | 'reels' | 'facebook' | 'linkedin';
+  onSave: () => void;
+  isSaving: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast.success("Copied to clipboard!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyFull = () => {
+    let text = `${post.hook}\n\n${post.caption}`;
+    if (post.script) {
+      text += `\n\n[VIDEO SCRIPT]:\n${post.script}`;
+    }
+    if (post.hashtags?.length) {
+      text += `\n\n${post.hashtags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}`;
+    }
+    copyToClipboard(text);
+  };
+
+  const meta = {
+    instagram: {
+      name: "Instagram Feed & Carousel",
+      badge: "Carousel / Image Post",
+      icon: "📸",
+      badgeColor: "bg-pink-50 text-pink-700 border-pink-200",
+      accentBtn: "bg-pink-600 hover:bg-pink-700",
+    },
+    reels: {
+      name: "Instagram Reels",
+      badge: "Viral Video + 30s Script",
+      icon: "🎬",
+      badgeColor: "bg-purple-50 text-purple-700 border-purple-200",
+      accentBtn: "bg-purple-600 hover:bg-purple-700",
+    },
+    facebook: {
+      name: "Facebook Community",
+      badge: "Discussion & Social Post",
+      icon: "📘",
+      badgeColor: "bg-blue-50 text-blue-700 border-blue-200",
+      accentBtn: "bg-blue-600 hover:bg-blue-700",
+    },
+    linkedin: {
+      name: "LinkedIn Thought Leadership",
+      badge: "B2B Framework & Insights",
+      icon: "💼",
+      badgeColor: "bg-slate-100 text-slate-800 border-slate-300",
+      accentBtn: "bg-slate-900 hover:bg-slate-800",
+    },
+  }[platformKey];
+
+  return (
+    <Card className="flex flex-col h-full bg-white border border-gray-200 shadow-sm transition-all duration-200">
+      <CardHeader className="pb-3 border-b border-gray-100 bg-gray-50/50">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">{meta.icon}</span>
+            <div>
+              <h4 className="text-sm font-bold text-gray-900 leading-tight">{meta.name}</h4>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border mt-0.5 inline-block ${meta.badgeColor}`}>
+                {meta.badge}
+              </span>
+            </div>
+          </div>
+          <Badge variant="secondary" className="bg-white text-gray-700 border border-gray-200 font-medium">
+            {post.post_type}
+          </Badge>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4 pt-4 flex-1">
+        <div>
+          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Hook / Headline</span>
+          <h3 className="font-bold text-gray-900 text-lg leading-snug p-3 rounded-lg bg-amber-50/50 border border-amber-200/60">
+            "{post.hook}"
+          </h3>
+        </div>
+
+        <div>
+          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Post Caption & Content</span>
+          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed bg-gray-50/80 p-3.5 rounded-lg border border-gray-100">
+            {post.caption}
+          </p>
+        </div>
+
+        {post.script && (
+          <div className="bg-purple-50/50 rounded-lg p-3.5 border border-purple-200/70">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-purple-800 flex items-center gap-1.5 uppercase tracking-wider">
+                🎬 30-Second Video Script & Timing
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(post.script!)}
+                className="h-6 px-2 text-[11px] text-purple-700 hover:bg-purple-100"
+              >
+                Copy Script
+              </Button>
+            </div>
+            <p className="text-xs text-gray-800 font-mono whitespace-pre-line leading-relaxed bg-white p-3 rounded border border-purple-100">
+              {post.script}
+            </p>
+          </div>
+        )}
+
+        {post.visual_prompt && (
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">🎨 Visual / Creative Direction</span>
+            <p className="text-xs text-gray-600 italic leading-relaxed">
+              {post.visual_prompt}
+            </p>
+          </div>
+        )}
+
+        {post.hashtags && post.hashtags.length > 0 && (
+          <div>
+            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">Recommended Hashtags</span>
+            <div className="flex flex-wrap gap-1.5">
+              {post.hashtags.map((tag) => {
+                const cleanTag = tag.startsWith('#') ? tag : `#${tag}`;
+                return (
+                  <span key={cleanTag} className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-medium border border-blue-100">
+                    {cleanTag}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="text-xs text-gray-500 font-medium pt-1">
+          ⏰ Best Time to Post: <span className="text-gray-900 font-semibold">{post.best_time}</span>
+        </div>
+      </CardContent>
+
+      <CardFooter className="pt-3 pb-4 border-t border-gray-100 flex gap-3 justify-between bg-gray-50/30">
+        <Button variant="outline" size="sm" onClick={handleCopyFull} className="border-gray-200 text-gray-700 hover:text-gray-900 hover:bg-gray-100 h-9">
+          <Copy className="w-3.5 h-3.5 mr-2" />
+          {copied ? "Copied!" : "Copy Post"}
+        </Button>
+        <Button
+          onClick={onSave}
+          disabled={isSaving}
+          size="sm"
+          className={cn("text-white shadow-none transition-all h-9 font-medium px-4", isSaving ? "opacity-70" : "opacity-100", meta.accentBtn)}
+        >
+          {isSaving ? "Saving..." : (
+            <>
+              <Save className="w-3.5 h-3.5 mr-2" />
+              Save to Board
+            </>
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="w-full h-full flex flex-col items-center justify-center text-center p-12 bg-white rounded-xl border border-gray-100/50 shadow-sm min-h-[500px]">
@@ -133,7 +297,7 @@ function EmptyState() {
       </div>
       <h3 className="text-lg font-semibold text-gray-900">Ready to Create?</h3>
       <p className="mt-2 text-gray-500 max-w-xs mx-auto text-sm leading-relaxed">
-        Configure your strategy on the left and generate 3 unique content variations.
+        Configure your parameters on the left to generate 3 strategic angles and 4 tailored platform posts.
       </p>
     </div>
   );
@@ -146,6 +310,8 @@ export default function AiCalendarPage() {
   const [error, setError] = useState<string | null>(null);
   const [variations, setVariations] = useState<PostVariations | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"platforms" | "strategy">("platforms");
+  const [activePlatformTab, setActivePlatformTab] = useState<"instagram" | "reels" | "facebook" | "linkedin">("instagram");
 
   const { user } = useAuthStore();
 
@@ -204,7 +370,54 @@ export default function AiCalendarPage() {
         cta: 'Share your thoughts in the comments or send us a DM for a personalized roadmap!',
         visual_prompt: `Minimalist, authoritative infographic highlighting key benchmarks and structured guidelines.`,
         script: `A step-by-step masterclass on optimizing your ${cleanNiche} performance.`
-      } as any
+      } as any,
+      platformPosts: {
+        instagram: {
+          day: formattedDate as any,
+          platform: 'Instagram',
+          hook: `The exact 5-step blueprint to master ${cleanNiche} in ${cleanCity} 📸`,
+          caption: `${descPrefix}Swipe through to discover how top performers approach ${cleanNiche} without getting overwhelmed.\n\nSlide 1: The core misconception\nSlide 2: What to eliminate this week\nSlide 3: The daily 15-minute protocol\nSlide 4: Key metric checklist\nSlide 5: Action summary\n\nDrop a ❤️ and save this post for your next session!`,
+          hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, `#${cleanCity.replace(/\s+/g, '')}Creators`, '#InstagramGrowth', '#CarouselPost', '#ViralContent', '#InstaTips'],
+          post_type: 'carousel',
+          best_time: '11:00 AM - 1:00 PM',
+          cta: 'Bookmark this carousel to revisit anytime!',
+          visual_prompt: `5-slide seamless carousel design: Slide 1 bold headline with gradient background, Slides 2-4 clean infographics with bullet points, Slide 5 bold CTA banner.`
+        },
+        reels: {
+          day: formattedDate as any,
+          platform: 'Instagram Reels',
+          hook: `POV: You stopped doing random ${cleanNiche} routines in ${cleanCity} and tried this instead 🎬`,
+          caption: `Stop overcomplicating your progress! This 30-second breakdown is the secret.\n\nTrending audio recommendation: Fast upbeat lofi beat.\n\nTag your workout/accountability partner below! 👇`,
+          hashtags: [`#${cleanNiche.replace(/\s+/g, '')}Reel`, `#${cleanCity.replace(/\s+/g, '')}Fitness`, '#ReelsTrending', '#ViralAudio', '#ReelOfTheDay', '#FYP'],
+          post_type: 'reel',
+          best_time: '6:30 PM - 8:30 PM',
+          cta: 'Follow for daily high-impact reels!',
+          visual_prompt: `Dynamic 9:16 vertical video. Fast transitions every 2.5 seconds with prominent neon on-screen subtitles and b-roll action footage.`,
+          script: `[0-3s Hook]: Stop scrolling if you do ${cleanNiche} in ${cleanCity}!\n[3-10s The Flaw]: 90% of people focus on the wrong variable and waste months.\n[10-20s The Shift]: Here is what you should do instead starting today.\n[20-30s CTA]: Try this for 7 days and see the difference. Follow for more daily routines!`
+        },
+        facebook: {
+          day: formattedDate as any,
+          platform: 'Facebook',
+          hook: `Quick question for our ${cleanCity} community: what's your biggest hurdle with ${cleanNiche}? 💬`,
+          caption: `${descPrefix}We were talking with several members here in ${cleanCity} this week, and one common theme kept coming up: staying consistent when life gets busy.\n\nHere are 3 small habits that make a world of difference:\n1. Schedule your sessions like non-negotiable appointments.\n2. Keep your prep routine under 5 minutes.\n3. Celebrate small weekly wins instead of waiting for months.\n\nWe'd love to hear your perspective — how do you handle busy days? Drop your thoughts below! 👇`,
+          hashtags: [`#${cleanCity}Community`, `#${cleanNiche.replace(/\s+/g, '')}Discussion`, '#CommunityFirst', '#LocalBusiness', '#DailyInspiration'],
+          post_type: 'static',
+          best_time: '1:00 PM - 3:00 PM',
+          cta: 'Join the conversation in the comments below!',
+          visual_prompt: `Authentic, relatable photo of real community members in ${cleanCity} engaged in session or workshop.`
+        },
+        linkedin: {
+          day: formattedDate as any,
+          platform: 'LinkedIn',
+          hook: `Most people treat ${cleanNiche} as a hobby. The top 1% treat it as an optimization system. 💼`,
+          caption: `${descPrefix}Over the past year analyzing performance in ${cleanCity}, one pattern stands out clearly:\n\nSuccess isn't about brute force. It's about systemic execution.\n\n📌 3 Core Takeaways:\n• Inputs matter more than outcomes: Focus on daily cadence.\n• Friction reduction: Remove decision fatigue before you start.\n• Feedback loops: What gets measured gets managed.\n\nThe framework is simple, but execution requires discipline.\n\nAgree or disagree? What's your framework for sustainable progress?\n\n♻️ Repost if you found this perspective insightful.`,
+          hashtags: [`#${cleanNiche.replace(/\s+/g, '')}`, '#Leadership', '#SystemicThinking', '#Productivity', '#ProfessionalGrowth', '#B2BStrategy'],
+          post_type: 'carousel',
+          best_time: '8:00 AM - 10:00 AM',
+          cta: 'Follow for weekly strategic breakdowns and repost to your network.',
+          visual_prompt: `Minimalist, dark-mode PDF document presentation slide deck. Clean Swiss typography with structured bullet icons and executive color palette.`
+        }
+      }
     };
   };
 
@@ -212,6 +425,17 @@ export default function AiCalendarPage() {
     setIsLoading(true);
     setError(null);
     setVariations(null);
+
+    // Sync active platform tab with the form selection
+    if (data.platform === "Instagram Reels") {
+      setActivePlatformTab("reels");
+    } else if (data.platform === "Facebook") {
+      setActivePlatformTab("facebook");
+    } else if (data.platform === "LinkedIn") {
+      setActivePlatformTab("linkedin");
+    } else {
+      setActivePlatformTab("instagram");
+    }
 
     const formattedDate = format(data.date, "yyyy-MM-dd");
     setSelectedDate(formattedDate);
@@ -232,7 +456,7 @@ export default function AiCalendarPage() {
         const localData = await localRes.json();
         if (localData?.variations?.viral && localData?.variations?.reach) {
           setVariations(localData.variations);
-          toast.success("Content generated successfully!");
+          toast.success("Content & platform posts generated!");
           setIsLoading(false);
           return;
         }
@@ -247,7 +471,7 @@ export default function AiCalendarPage() {
       const result = response.data;
       if (result?.variations?.viral && result?.variations?.reach) {
         setVariations(result.variations);
-        toast.success("Content generated successfully!");
+        toast.success("Content & platform posts generated!");
         setIsLoading(false);
         return;
       }
@@ -259,7 +483,7 @@ export default function AiCalendarPage() {
     try {
       const fallbackData = generateLocalFallback(data, formattedDate);
       setVariations(fallbackData);
-      toast.success("Content generated successfully!");
+      toast.success("Content & platform posts generated!");
     } catch (err: any) {
       console.error(err);
       setError("An unexpected error occurred. Please try again.");
@@ -450,42 +674,152 @@ export default function AiCalendarPage() {
             </div>
           )}
 
-          {variations && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-              <div className="flex items-center justify-between mb-8">
-                <h2 className="text-2xl font-bold text-gray-900">Generated Strategy</h2>
-                <Badge variant="outline" className="text-gray-500 border-gray-200 px-3 py-1 text-sm font-normal">
-                  {selectedDate}
-                </Badge>
-              </div>
+          {variations && (() => {
+            const platformPosts = variations.platformPosts || {
+              instagram: { ...variations.reach, platform: 'Instagram' },
+              reels: { ...variations.viral, platform: 'Instagram Reels', post_type: 'reel' as const },
+              facebook: { ...variations.niche, platform: 'Facebook', post_type: 'static' as const },
+              linkedin: { ...variations.niche, platform: 'LinkedIn', post_type: 'carousel' as const },
+            };
 
-              <Tabs defaultValue="viral" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 p-1 bg-gray-100/50 rounded-xl mb-8">
-                  <TabsTrigger value="viral" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-medium text-gray-500 data-[state=active]:text-gray-900">
-                    Viral Factor
-                  </TabsTrigger>
-                  <TabsTrigger value="reach" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-medium text-gray-500 data-[state=active]:text-gray-900">
-                    Most Reach
-                  </TabsTrigger>
-                  <TabsTrigger value="niche" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-medium text-gray-500 data-[state=active]:text-gray-900">
-                    Niche Special
-                  </TabsTrigger>
-                </TabsList>
+            return (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-5">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <h2 className="text-2xl font-bold text-gray-900">Generated Content</h2>
+                      <Badge variant="outline" className="text-gray-500 border-gray-200 px-2.5 py-0.5 text-xs font-normal">
+                        {selectedDate}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Switch between Strategy Angles and tailored posts for each social platform.
+                    </p>
+                  </div>
 
-                <div className="mt-6">
-                  <TabsContent value="viral" className="mt-0 focus-visible:outline-none">
-                    <PostCard post={variations.viral} type="viral" onSave={() => handleSavePost(variations.viral, 'viral')} isSaving={isSaving} />
-                  </TabsContent>
-                  <TabsContent value="reach" className="mt-0 focus-visible:outline-none">
-                    <PostCard post={variations.reach} type="reach" onSave={() => handleSavePost(variations.reach, 'reach')} isSaving={isSaving} />
-                  </TabsContent>
-                  <TabsContent value="niche" className="mt-0 focus-visible:outline-none">
-                    <PostCard post={variations.niche} type="niche" onSave={() => handleSavePost(variations.niche, 'niche')} isSaving={isSaving} />
-                  </TabsContent>
+                  {/* Dual View Mode Switcher */}
+                  <div className="flex items-center p-1 bg-gray-100 rounded-xl border border-gray-200 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("platforms")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer",
+                        viewMode === "platforms"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-600 hover:text-gray-900"
+                      )}
+                    >
+                      <span>📱</span>
+                      <span>Platform Posts</span>
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded-full font-bold">4</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("strategy")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer",
+                        viewMode === "strategy"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-600 hover:text-gray-900"
+                      )}
+                    >
+                      <span>🎯</span>
+                      <span>Strategy Angles</span>
+                      <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-full font-bold">3</span>
+                    </button>
+                  </div>
                 </div>
-              </Tabs>
-            </div>
-          )}
+
+                {viewMode === "platforms" ? (
+                  <Tabs value={activePlatformTab} onValueChange={(val: any) => setActivePlatformTab(val)} className="w-full">
+                    <TabsList className="grid w-full grid-cols-4 p-1 bg-gray-100/70 border border-gray-200/60 rounded-xl mb-6">
+                      <TabsTrigger value="instagram" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-xs sm:text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        📸 Instagram
+                      </TabsTrigger>
+                      <TabsTrigger value="reels" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-xs sm:text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        🎬 Reels
+                      </TabsTrigger>
+                      <TabsTrigger value="facebook" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-xs sm:text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        📘 Facebook
+                      </TabsTrigger>
+                      <TabsTrigger value="linkedin" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-xs sm:text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        💼 LinkedIn
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <div className="mt-4">
+                      <TabsContent value="instagram" className="mt-0 focus-visible:outline-none">
+                        {platformPosts.instagram && (
+                          <PlatformPostCard
+                            post={platformPosts.instagram}
+                            platformKey="instagram"
+                            onSave={() => handleSavePost(platformPosts.instagram, 'niche')}
+                            isSaving={isSaving}
+                          />
+                        )}
+                      </TabsContent>
+                      <TabsContent value="reels" className="mt-0 focus-visible:outline-none">
+                        {platformPosts.reels && (
+                          <PlatformPostCard
+                            post={platformPosts.reels}
+                            platformKey="reels"
+                            onSave={() => handleSavePost(platformPosts.reels, 'viral')}
+                            isSaving={isSaving}
+                          />
+                        )}
+                      </TabsContent>
+                      <TabsContent value="facebook" className="mt-0 focus-visible:outline-none">
+                        {platformPosts.facebook && (
+                          <PlatformPostCard
+                            post={platformPosts.facebook}
+                            platformKey="facebook"
+                            onSave={() => handleSavePost(platformPosts.facebook, 'reach')}
+                            isSaving={isSaving}
+                          />
+                        )}
+                      </TabsContent>
+                      <TabsContent value="linkedin" className="mt-0 focus-visible:outline-none">
+                        {platformPosts.linkedin && (
+                          <PlatformPostCard
+                            post={platformPosts.linkedin}
+                            platformKey="linkedin"
+                            onSave={() => handleSavePost(platformPosts.linkedin, 'reach')}
+                            isSaving={isSaving}
+                          />
+                        )}
+                      </TabsContent>
+                    </div>
+                  </Tabs>
+                ) : (
+                  <Tabs defaultValue="viral" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3 p-1 bg-gray-100/70 border border-gray-200/60 rounded-xl mb-6">
+                      <TabsTrigger value="viral" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        ⚡ Viral Factor
+                      </TabsTrigger>
+                      <TabsTrigger value="reach" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        📈 Most Reach
+                      </TabsTrigger>
+                      <TabsTrigger value="niche" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm py-2.5 text-sm font-semibold text-gray-600 data-[state=active]:text-gray-900">
+                        🎯 Niche Special
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <div className="mt-4">
+                      <TabsContent value="viral" className="mt-0 focus-visible:outline-none">
+                        <PostCard post={variations.viral} type="viral" onSave={() => handleSavePost(variations.viral, 'viral')} isSaving={isSaving} />
+                      </TabsContent>
+                      <TabsContent value="reach" className="mt-0 focus-visible:outline-none">
+                        <PostCard post={variations.reach} type="reach" onSave={() => handleSavePost(variations.reach, 'reach')} isSaving={isSaving} />
+                      </TabsContent>
+                      <TabsContent value="niche" className="mt-0 focus-visible:outline-none">
+                        <PostCard post={variations.niche} type="niche" onSave={() => handleSavePost(variations.niche, 'niche')} isSaving={isSaving} />
+                      </TabsContent>
+                    </div>
+                  </Tabs>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </main>
     </div>
