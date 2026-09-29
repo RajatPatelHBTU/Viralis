@@ -50,6 +50,23 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const [leadFormData, setLeadFormData] = useState({ name: '', phone: '', email: '' });
   const [latestCaption, setLatestCaption] = useState<string>('');
   const [latestUserTranscript, setLatestUserTranscript] = useState<string>('');
+  const [textInput, setTextInput] = useState<string>('');
+
+  const sendQuestion = (text: string) => {
+    const cleanText = text.trim();
+    if (!cleanText || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    setLatestUserTranscript(cleanText);
+    setLatestCaption(cleanText);
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsTalking(false);
+    wsRef.current.send(JSON.stringify({ type: 'user_speech', text: cleanText }));
+  };
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -155,28 +172,59 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
-      recognition.onresult = (event: any) => {
-        if (isTalkingRef.current) return;
+      let silenceTimer: any = null;
 
+      recognition.onresult = (event: any) => {
         let finalTranscript = '';
+        let interimTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const trans = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
+            finalTranscript += trans;
+          } else {
+            interimTranscript += trans;
           }
         }
 
-        const trimmed = finalTranscript.trim();
-        if (trimmed && trimmed.length > 1) {
-          console.log('🗣️ Local SpeechRecognition recognized:', trimmed);
-          setLatestUserTranscript(trimmed);
-          setLatestCaption(trimmed);
+        const currentSpeech = (finalTranscript || interimTranscript).trim();
+        if (currentSpeech) {
+          setLatestUserTranscript(currentSpeech);
+          setLatestCaption(currentSpeech);
 
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'user_speech',
-              text: trimmed
-            }));
+          // If AI was speaking, user is barging in: stop AI audio
+          if (currentAudioRef.current) {
+            currentAudioRef.current.pause();
+            currentAudioRef.current = null;
           }
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+          }
+          setIsTalking(false);
+        }
+
+        const dispatchUtterance = (text: string) => {
+          const cleanText = text.trim();
+          if (cleanText && cleanText.length > 1) {
+            console.log('🗣️ Local SpeechRecognition sending utterance:', cleanText);
+            setLatestUserTranscript(cleanText);
+            setLatestCaption(cleanText);
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'user_speech',
+                text: cleanText
+              }));
+            }
+          }
+        };
+
+        if (finalTranscript.trim()) {
+          if (silenceTimer) clearTimeout(silenceTimer);
+          dispatchUtterance(finalTranscript);
+        } else if (interimTranscript.trim() && interimTranscript.trim().length > 3) {
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            dispatchUtterance(interimTranscript);
+          }, 900);
         }
       };
 
@@ -334,9 +382,6 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     muteGain.connect(audioContext.destination);
 
     processor.onaudioprocess = (e) => {
-      // Don't send mic audio while AI is speaking
-      if (isTalkingRef.current) return;
-
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         const inputData = e.inputBuffer.getChannelData(0);
         const downsampled = downsampleBuffer(inputData, audioContext.sampleRate, 16000);
@@ -571,8 +616,55 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
 
       </main>
 
+      {/* Quick Action Chips & Text Input Bar */}
+      {status === 'LIVE' && (
+        <div className="w-full max-w-md mx-auto px-6 mb-1 flex flex-col gap-2 z-10">
+          <div className="flex flex-wrap gap-1.5 justify-center">
+            {[
+              "What are your services?",
+              "What are your opening hours?",
+              "Where are you located?"
+            ].map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => sendQuestion(chip)}
+                className="text-[11px] bg-white/90 hover:bg-purple-50 text-purple-700 border border-purple-200/80 hover:border-purple-300 rounded-full px-2.5 py-1 transition-all shadow-sm font-medium"
+              >
+                💬 {chip}
+              </button>
+            ))}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (textInput.trim()) {
+                sendQuestion(textInput.trim());
+                setTextInput('');
+              }
+            }}
+            className="flex gap-1.5 items-center mt-0.5"
+          >
+            <Input
+              placeholder="Or type a question for AI to speak..."
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              className="h-9 text-xs bg-white/90 border-gray-200 rounded-xl"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              className="h-9 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-semibold shrink-0"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </Button>
+          </form>
+        </div>
+      )}
+
       {/* Footer Actions */}
-      <footer className="p-8 pb-10 flex flex-col gap-4 z-10 w-full max-w-md mx-auto">
+      <footer className="p-6 pt-2 pb-8 flex flex-col gap-4 z-10 w-full max-w-md mx-auto">
         {status === 'LIVE' ? (
           <Button
             onClick={endCall}
