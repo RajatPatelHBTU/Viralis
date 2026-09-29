@@ -7,7 +7,23 @@ console.log('🚀 Running Viralis Vercel Deployment Build...');
 const frontendDir = path.join(__dirname, '..', 'frontend');
 const rootDir = path.join(__dirname, '..');
 
-// 1. Ensure frontend dependencies are installed
+const backendDir = path.join(__dirname, '..', 'Backend');
+
+// 1. Build Backend if present (for Render or monorepo environments)
+if (fs.existsSync(backendDir)) {
+    console.log('📦 Building Backend TypeScript dist...');
+    try {
+        if (!fs.existsSync(path.join(backendDir, 'node_modules'))) {
+            execSync('npm install', { cwd: backendDir, stdio: 'inherit' });
+        }
+        execSync('npm run build', { cwd: backendDir, stdio: 'inherit' });
+        console.log('✅ Backend build finished');
+    } catch (e) {
+        console.warn('Backend build notice (skipping):', e.message);
+    }
+}
+
+// 2. Ensure frontend dependencies are installed
 if (!fs.existsSync(path.join(frontendDir, 'node_modules'))) {
     console.log('📦 Installing frontend dependencies...');
     execSync('npm install', { cwd: frontendDir, stdio: 'inherit' });
