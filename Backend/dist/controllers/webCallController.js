@@ -198,6 +198,128 @@ const handleWebConnection = async (ws, req) => {
     let liveSTT = null;
     const pendingAudioChunks = [];
     let isSttOpen = false;
+    // Handler for processing user speech from any source (Deepgram STT or Browser STT)
+    let isProcessingUtterance = false;
+    let lastProcessedTranscript = '';
+    let lastProcessedAt = 0;
+    const handleUserUtterance = async (rawText) => {
+        const transcript = rawText.trim();
+        if (!transcript || transcript.length < 2)
+            return;
+        const now = Date.now();
+        // Prevent duplicate processing of the same phrase within 2.5 seconds
+        if (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500)) {
+            return;
+        }
+        isProcessingUtterance = true;
+        lastProcessedTranscript = transcript;
+        lastProcessedAt = now;
+        try {
+            console.log(`🗣️ User: "${transcript}"`);
+            conversationLog.push(`User: ${transcript}`);
+            // Send user transcript back to client immediately
+            if (ws.readyState === ws_1.WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: transcript }));
+            }
+            // Process with Gemini or fallback response
+            let responseText = '';
+            if (geminiKey) {
+                try {
+                    if (chat) {
+                        console.log(`➡️ Sending to Gemini chat: "${transcript}"`);
+                        const result = await chat.sendMessage(transcript);
+                        responseText = result.response.text();
+                    }
+                    else {
+                        const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey);
+                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const result = await model.generateContent([
+                            createSystemPrompt(brand),
+                            `User question: ${transcript}\nRespond concisely in 1-2 spoken sentences:`
+                        ]);
+                        responseText = result.response.text();
+                    }
+                }
+                catch (aiErr) {
+                    console.error('Gemini error, attempting single-shot recovery:', aiErr);
+                    try {
+                        const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey);
+                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const result = await model.generateContent([
+                            createSystemPrompt(brand),
+                            `User question: ${transcript}\nRespond concisely in 1 spoken sentence:`
+                        ]);
+                        responseText = result.response.text();
+                    }
+                    catch (fallbackErr) {
+                        console.error('Gemini recovery also failed:', fallbackErr);
+                    }
+                }
+            }
+            if (!responseText) {
+                // Intelligent fallback response
+                if (detectInterest(transcript) || transcript.toLowerCase().includes('price') || transcript.toLowerCase().includes('cost')) {
+                    responseText = `We'd love to help you with that! Our services start at very competitive rates and I can log your request right now. What's your name and best phone number?`;
+                }
+                else if (transcript.toLowerCase().includes('hour') || transcript.toLowerCase().includes('open') || transcript.toLowerCase().includes('time')) {
+                    responseText = `We are open ${brand.businessHours || brand.knowledgeBase?.businessHours || 'daily'}. How can I assist you further?`;
+                }
+                else {
+                    responseText = `Thank you for asking. Regarding ${brand.name}, I can help you with our services, answer any questions, or connect you with our team!`;
+                }
+            }
+            console.log(`🤖 AI Response: "${responseText}"`);
+            conversationLog.push(`AI: ${responseText}`);
+            // Detect user interest
+            const isNewInterest = detectInterest(responseText) || detectInterest(transcript);
+            if (isNewInterest) {
+                userInterested = true;
+                if (ws.readyState === ws_1.WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'interest_detected', interested: true }));
+                }
+            }
+            // Send AI transcript to client immediately
+            if (ws.readyState === ws_1.WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText }));
+            }
+            // Generate TTS Audio via Deepgram if available
+            let ttsSent = false;
+            if (deepgram) {
+                try {
+                    console.log('🗣️ Requesting TTS from Deepgram...');
+                    const ttsResponse = await deepgram.speak.request({ text: responseText }, { model: 'aura-asteria-en' });
+                    const stream = await ttsResponse.getStream();
+                    if (stream) {
+                        const reader = stream.getReader();
+                        const chunks = [];
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done)
+                                break;
+                            if (value)
+                                chunks.push(value);
+                        }
+                        const combinedBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
+                        if (combinedBuffer.length > 0 && ws.readyState === ws_1.WebSocket.OPEN) {
+                            ws.send(combinedBuffer);
+                            ttsSent = true;
+                            console.log(`✅ Sent TTS Audio (${combinedBuffer.length} bytes) to client`);
+                        }
+                    }
+                }
+                catch (ttsErr) {
+                    console.error('❌ TTS Generation Error:', ttsErr);
+                }
+            }
+            // Fallback to browser SpeechSynthesis if Deepgram audio was not sent
+            if (!ttsSent && ws.readyState === ws_1.WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'speak_text', text: responseText }));
+            }
+        }
+        finally {
+            isProcessingUtterance = false;
+        }
+    };
     if (deepgramKey) {
         try {
             deepgram = (0, sdk_1.createClient)(deepgramKey);
@@ -207,6 +329,10 @@ const handleWebConnection = async (ws, req) => {
                 smart_format: true,
                 encoding: 'linear16',
                 sample_rate: 16000,
+                endpointing: 300,
+                interim_results: true,
+                utterance_end_ms: 1000,
+                vad_events: true,
             });
             liveSTT.on(sdk_1.LiveTranscriptionEvents.Open, () => {
                 console.log('🎤 Deepgram STT Connected & Listening');
@@ -219,91 +345,41 @@ const handleWebConnection = async (ws, req) => {
                     }
                 }
             });
+            let accumulatedUtterance = '';
+            let silenceTimer = null;
+            const triggerUtterance = async () => {
+                if (silenceTimer) {
+                    clearTimeout(silenceTimer);
+                    silenceTimer = null;
+                }
+                const toProcess = accumulatedUtterance.trim();
+                accumulatedUtterance = '';
+                if (toProcess.length > 1) {
+                    await handleUserUtterance(toProcess);
+                }
+            };
             liveSTT.on(sdk_1.LiveTranscriptionEvents.Transcript, async (data) => {
                 const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
-                if (transcript && data.is_final) {
-                    console.log(`🗣️ User: ${transcript}`);
-                    conversationLog.push(`User: ${transcript}`);
-                    // Send user transcript back to client
-                    if (ws.readyState === ws_1.WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: transcript }));
+                const isSpeechFinal = Boolean(data.speech_final);
+                const isFinal = Boolean(data.is_final);
+                if (transcript) {
+                    if (isSpeechFinal) {
+                        accumulatedUtterance = accumulatedUtterance ? `${accumulatedUtterance} ${transcript}`.trim() : transcript;
+                        await triggerUtterance();
                     }
-                    // Process with Gemini or fallback response
-                    let responseText = '';
-                    if (chat) {
-                        try {
-                            console.log(`➡️ Sending to Gemini: "${transcript}"`);
-                            const result = await chat.sendMessage(transcript);
-                            responseText = result.response.text();
-                        }
-                        catch (aiErr) {
-                            console.error('Gemini error, attempting recovery:', aiErr);
-                            responseText = `I understand. Regarding ${brand.name}, I can help you with services and pricing or connect you directly with our team.`;
-                        }
-                    }
-                    else {
-                        // Intelligent fallback response
-                        if (detectInterest(transcript) || transcript.toLowerCase().includes('price') || transcript.toLowerCase().includes('cost')) {
-                            responseText = `We'd love to help you with that! Our services start at very competitive rates and I can log your request right now. What's your name and best phone number?`;
-                        }
-                        else {
-                            responseText = `Thank you for reaching out to ${brand.name}. How can I best assist you today?`;
-                        }
-                    }
-                    if (!responseText)
-                        return;
-                    console.log(`🤖 AI Response: "${responseText}"`);
-                    conversationLog.push(`AI: ${responseText}`);
-                    // Detect user interest
-                    const isNewInterest = detectInterest(responseText) || detectInterest(transcript);
-                    if (isNewInterest) {
-                        userInterested = true;
-                        if (ws.readyState === ws_1.WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'interest_detected', interested: true }));
-                        }
-                    }
-                    // Send AI transcript to client
-                    if (ws.readyState === ws_1.WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText }));
-                    }
-                    // Generate TTS Audio via Deepgram
-                    if (deepgram) {
-                        try {
-                            console.log('🗣️ Requesting TTS from Deepgram...');
-                            const ttsResponse = await deepgram.speak.request({ text: responseText }, { model: 'aura-asteria-en' });
-                            const stream = await ttsResponse.getStream();
-                            if (stream) {
-                                const reader = stream.getReader();
-                                const chunks = [];
-                                while (true) {
-                                    const { done, value } = await reader.read();
-                                    if (done)
-                                        break;
-                                    if (value)
-                                        chunks.push(value);
-                                }
-                                const combinedBuffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
-                                if (ws.readyState === ws_1.WebSocket.OPEN) {
-                                    ws.send(combinedBuffer);
-                                    console.log(`✅ Sent TTS Audio (${combinedBuffer.length} bytes) to client`);
-                                }
-                            }
-                        }
-                        catch (ttsErr) {
-                            console.error('❌ TTS Generation Error:', ttsErr);
-                            // Signal client to speak via Web Speech API fallback
-                            if (ws.readyState === ws_1.WebSocket.OPEN) {
-                                ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText, speakFallback: true }));
-                            }
-                        }
-                    }
-                    else {
-                        // Fallback speech for client
-                        if (ws.readyState === ws_1.WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: responseText, speakFallback: true }));
-                        }
+                    else if (isFinal) {
+                        accumulatedUtterance = accumulatedUtterance ? `${accumulatedUtterance} ${transcript}`.trim() : transcript;
+                        // Reset silence debounce timer
+                        if (silenceTimer)
+                            clearTimeout(silenceTimer);
+                        silenceTimer = setTimeout(() => {
+                            triggerUtterance();
+                        }, 1200);
                     }
                 }
+            });
+            liveSTT.on(sdk_1.LiveTranscriptionEvents.UtteranceEnd, async () => {
+                await triggerUtterance();
             });
             liveSTT.on(sdk_1.LiveTranscriptionEvents.Error, (err) => {
                 console.error('Deepgram STT Error:', err);
@@ -361,35 +437,50 @@ const handleWebConnection = async (ws, req) => {
             }
         }
     }, 500);
-    // 5. Pipe Incoming Audio from Client
-    ws.on('message', (data) => {
-        const buf = Buffer.isBuffer(data)
-            ? data
-            : data instanceof ArrayBuffer
-                ? Buffer.from(data)
-                : Buffer.isBuffer(data?.buffer)
-                    ? data.buffer
-                    : null;
-        if (buf) {
+    // 5. Pipe Incoming Audio and Speech from Client
+    ws.on('message', async (data, isBinary) => {
+        let isTextJson = false;
+        // Check if message is a JSON string or text buffer
+        if (typeof data === 'string' || (!isBinary && Buffer.isBuffer(data) && data.length < 2000)) {
+            try {
+                const textStr = typeof data === 'string' ? data : data.toString('utf8');
+                if (textStr.trim().startsWith('{')) {
+                    const parsed = JSON.parse(textStr);
+                    isTextJson = true;
+                    if (parsed.type === 'ping') {
+                        ws.send(JSON.stringify({ type: 'pong' }));
+                    }
+                    else if ((parsed.type === 'user_speech' || parsed.type === 'speech' || parsed.type === 'transcript') && parsed.text) {
+                        console.log(`🎤 Received speech from client: "${parsed.text}"`);
+                        await handleUserUtterance(parsed.text);
+                    }
+                }
+            }
+            catch {
+                // Not JSON, fall through to audio buffer processing
+            }
+        }
+        if (isTextJson)
+            return;
+        // Process Binary Audio Chunks for Deepgram STT
+        let buf = null;
+        if (Buffer.isBuffer(data)) {
+            buf = data;
+        }
+        else if (data instanceof ArrayBuffer) {
+            buf = Buffer.from(data);
+        }
+        else if (ArrayBuffer.isView(data)) {
+            buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        }
+        if (buf && buf.length > 0) {
             if (liveSTT && isSttOpen && liveSTT.getReadyState() === 1) {
                 liveSTT.send(buf);
             }
             else if (liveSTT) {
-                // Buffer audio while STT connection is opening
                 if (pendingAudioChunks.length < 50) {
                     pendingAudioChunks.push(buf);
                 }
-            }
-        }
-        else if (typeof data === 'string') {
-            try {
-                const parsed = JSON.parse(data);
-                if (parsed.type === 'ping') {
-                    ws.send(JSON.stringify({ type: 'pong' }));
-                }
-            }
-            catch {
-                console.log('📩 Received Text:', data);
             }
         }
     });

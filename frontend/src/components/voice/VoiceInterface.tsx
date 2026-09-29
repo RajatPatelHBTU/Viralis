@@ -48,21 +48,88 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const [callDuration, setCallDuration] = useState(0);
   const [leadSubmitted, setLeadSubmitted] = useState(false);
   const [leadFormData, setLeadFormData] = useState({ name: '', phone: '', email: '' });
+  const [latestCaption, setLatestCaption] = useState<string>('');
+  const [latestUserTranscript, setLatestUserTranscript] = useState<string>('');
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<any>(null);
+  const sourceRef = useRef<any>(null);
+  const recognitionRef = useRef<any>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fallbackTtsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastAiTextRef = useRef<string>('');
+  const isTalkingRef = useRef<boolean>(false);
+  const statusRef = useRef<ConnectionStatus>('IDLE');
   const callStartTimeRef = useRef<number>(0);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    isTalkingRef.current = isTalking;
+  }, [isTalking]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const speakWithBrowser = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.onstart = () => setIsTalking(true);
+      utterance.onend = () => setIsTalking(false);
+      utterance.onerror = () => setIsTalking(false);
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn('SpeechSynthesis error:', e);
+      setIsTalking(false);
+    }
+  };
+
   const endCall = () => {
+    if (fallbackTtsTimerRef.current) {
+      clearTimeout(fallbackTtsTimerRef.current);
+      fallbackTtsTimerRef.current = null;
+    }
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
     wsRef.current?.close();
     mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    if (processorRef.current) {
+      try {
+        processorRef.current.disconnect();
+      } catch {}
+      processorRef.current = null;
+    }
+    if (sourceRef.current) {
+      try {
+        sourceRef.current.disconnect();
+      } catch {}
+      sourceRef.current = null;
+    }
     audioContextRef.current?.close();
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
     }
+    setIsTalking(false);
+    setLatestCaption('');
+    setLatestUserTranscript('');
     setStatus('IDLE');
   };
 
@@ -73,12 +140,74 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     };
   }, []);
 
+  const startSpeechRecognition = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) {
+      console.log('Browser SpeechRecognition not available; using binary Deepgram audio stream.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognitionClass();
+      recognitionRef.current = recognition;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        if (isTalkingRef.current) return;
+
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const trimmed = finalTranscript.trim();
+        if (trimmed && trimmed.length > 1) {
+          console.log('🗣️ Local SpeechRecognition recognized:', trimmed);
+          setLatestUserTranscript(trimmed);
+          setLatestCaption(trimmed);
+
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'user_speech',
+              text: trimmed
+            }));
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error !== 'no-speech') {
+          console.warn('SpeechRecognition error:', event.error);
+        }
+      };
+
+      recognition.onend = () => {
+        if (statusRef.current === 'LIVE' && recognitionRef.current) {
+          try {
+            recognition.start();
+          } catch {}
+        }
+      };
+
+      recognition.start();
+    } catch (e) {
+      console.warn('Could not initialize SpeechRecognition:', e);
+    }
+  };
+
   const startCall = async () => {
     setStatus('CONNECTING');
     setUserInterested(false);
     setShowLeadForm(false);
     setLeadSubmitted(false);
     setCallDuration(0);
+    setLatestCaption('');
+    setLatestUserTranscript('');
 
     try {
       // 1. Get Mic Permission
@@ -106,6 +235,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
         setStatus('LIVE');
         callStartTimeRef.current = Date.now();
         setupAudioProcessing(stream);
+        startSpeechRecognition();
 
         // Start timer
         timerIntervalRef.current = setInterval(() => {
@@ -122,12 +252,24 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
             const msg = JSON.parse(event.data);
             if (msg.type === 'transcript') {
               console.log(`[${msg.role || 'ai'}]:`, msg.text);
-              if (msg.speakFallback && 'speechSynthesis' in window && msg.role === 'ai') {
-                const utterance = new SpeechSynthesisUtterance(msg.text);
-                utterance.onstart = () => setIsTalking(true);
-                utterance.onend = () => setIsTalking(false);
-                window.speechSynthesis.speak(utterance);
+              if (msg.role === 'ai') {
+                lastAiTextRef.current = msg.text;
+                setLatestCaption(msg.text);
+                setLatestUserTranscript('');
+
+                // Schedule browser speech synthesis fallback if no audio blob arrives within 700ms
+                if (fallbackTtsTimerRef.current) clearTimeout(fallbackTtsTimerRef.current);
+                fallbackTtsTimerRef.current = setTimeout(() => {
+                  speakWithBrowser(msg.text);
+                }, 700);
+              } else if (msg.role === 'user') {
+                setLatestUserTranscript(msg.text);
+                setLatestCaption(msg.text);
               }
+            } else if (msg.type === 'speak_text' && msg.text) {
+              lastAiTextRef.current = msg.text;
+              setLatestCaption(msg.text);
+              speakWithBrowser(msg.text);
             } else if (msg.type === 'interest_detected' && msg.interested) {
               console.log('📩 Interest detected by agent');
               setUserInterested(true);
@@ -178,12 +320,23 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     console.log(`🎤 Native Sample Rate: ${audioContext.sampleRate}`);
 
     const source = audioContext.createMediaStreamSource(stream);
+    sourceRef.current = source;
+
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processorRef.current = processor; // Store reference so GC does not collect it!
+
+    // Connect through a mute gain node to prevent speaker feedback loop
+    const muteGain = audioContext.createGain();
+    muteGain.gain.value = 0;
 
     source.connect(processor);
-    processor.connect(audioContext.destination);
+    processor.connect(muteGain);
+    muteGain.connect(audioContext.destination);
 
     processor.onaudioprocess = (e) => {
+      // Don't send mic audio while AI is speaking
+      if (isTalkingRef.current) return;
+
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         const inputData = e.inputBuffer.getChannelData(0);
         const downsampled = downsampleBuffer(inputData, audioContext.sampleRate, 16000);
@@ -226,28 +379,42 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   };
 
   const playAudioBlob = async (blob: Blob) => {
+    // Clear any pending browser speech synthesis fallback
+    if (fallbackTtsTimerRef.current) {
+      clearTimeout(fallbackTtsTimerRef.current);
+      fallbackTtsTimerRef.current = null;
+    }
+
     try {
-      const arrayBuffer = await blob.arrayBuffer();
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
       }
 
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
 
-      setIsTalking(true);
-      source.onended = () => {
+      audio.onplay = () => setIsTalking(true);
+      audio.onended = () => {
         setIsTalking(false);
+        URL.revokeObjectURL(audioUrl);
       };
-      source.start(0);
+      audio.onerror = () => {
+        setIsTalking(false);
+        URL.revokeObjectURL(audioUrl);
+        if (lastAiTextRef.current) {
+          speakWithBrowser(lastAiTextRef.current);
+        }
+      };
+
+      await audio.play();
     } catch (e) {
-      console.error('Audio Playback Error', e);
+      console.warn('Audio element play failed, falling back to speech synthesis:', e);
       setIsTalking(false);
+      if (lastAiTextRef.current) {
+        speakWithBrowser(lastAiTextRef.current);
+      }
     }
   };
 
@@ -386,8 +553,17 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
               className="space-y-2"
             >
               <p className="text-gray-900 text-lg font-semibold leading-relaxed">
-                {isTalking ? "Speaking..." : "Listening..."}
+                {isTalking ? "Speaking..." : (latestUserTranscript ? "Thinking..." : "Listening...")}
               </p>
+              {latestCaption && (
+                <motion.p
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-purple-600 font-medium px-2 line-clamp-2 italic"
+                >
+                  "{latestCaption}"
+                </motion.p>
+              )}
               <p className="text-xs text-gray-400 font-medium">Powered by Viralis AI</p>
             </motion.div>
           )}
