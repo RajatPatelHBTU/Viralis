@@ -214,8 +214,8 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
     if (geminiKey) {
         try {
             const genAI = new GoogleGenerativeAI(geminiKey);
-            // gemini-1.5-flash is fast and low-latency for voice
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            // gemini-3.5-flash-lite provides sub-second (~960ms) response latency for natural voice calls
+            const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
             chat = model.startChat({
                 history: [
                     {
@@ -228,7 +228,7 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
                     }
                 ]
             });
-            console.log('🤖 Gemini Chat Session initialized');
+            console.log('🤖 Gemini Chat Session initialized with gemini-3.5-flash-lite');
         } catch (err) {
             console.error('❌ Error initializing Gemini Chat:', err);
         }
@@ -278,7 +278,7 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
                         responseText = result.response.text();
                     } else {
                         const genAI = new GoogleGenerativeAI(geminiKey);
-                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
                         const result = await model.generateContent([
                             createSystemPrompt(brand),
                             `User question: ${transcript}\nRespond concisely in 1-2 spoken sentences:`
@@ -286,10 +286,10 @@ export const handleWebConnection = async (ws: WebSocket, req: Request) => {
                         responseText = result.response.text();
                     }
                 } catch (aiErr) {
-                    console.error('Gemini error, attempting single-shot recovery:', aiErr);
+                    console.error('Gemini error, attempting single-shot recovery with gemini-3.1-flash-lite:', aiErr);
                     try {
                         const genAI = new GoogleGenerativeAI(geminiKey);
-                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+                        const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
                         const result = await model.generateContent([
                             createSystemPrompt(brand),
                             `User question: ${transcript}\nRespond concisely in 1 spoken sentence:`
