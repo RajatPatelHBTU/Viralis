@@ -58,6 +58,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     if (!cleanText || wsRef.current?.readyState !== WebSocket.OPEN) return;
     setLatestUserTranscript(cleanText);
     setLatestCaption(cleanText);
+    hasSpokenAiTextRef.current = '';
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
@@ -80,11 +81,22 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const fallbackTtsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAiTextRef = useRef<string>('');
+  const hasSpokenAiTextRef = useRef<string>('');
   const isTalkingRef = useRef<boolean>(false);
   const isListeningModeRef = useRef<boolean>(true);
   const statusRef = useRef<ConnectionStatus>('IDLE');
   const callStartTimeRef = useRef<number>(0);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Pre-load browser speech synthesis voices so female voice is readily available
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   useEffect(() => {
     isTalkingRef.current = isTalking;
@@ -181,13 +193,53 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     }
   };
 
+  const getFemaleVoice = (): SpeechSynthesisVoice | null => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+
+    // Search for known natural female English voices matching Asteria
+    const femaleKeywords = ['zira', 'samantha', 'victoria', 'karen', 'jenny', 'aria', 'ava', 'female', 'woman'];
+    const femaleVoice = voices.find(v => {
+      const name = v.name.toLowerCase();
+      return femaleKeywords.some(kw => name.includes(kw)) && v.lang.startsWith('en');
+    });
+    if (femaleVoice) return femaleVoice;
+
+    // Next preference: English voice that is not explicitly male
+    const maleKeywords = ['david', 'mark', 'george', 'guy', 'male', 'man', 'richard'];
+    const nonMaleVoice = voices.find(v => {
+      const name = v.name.toLowerCase();
+      return v.lang.startsWith('en') && !maleKeywords.some(kw => name.includes(kw));
+    });
+    if (nonMaleVoice) return nonMaleVoice;
+
+    return voices[0] || null;
+  };
+
   const speakWithBrowser = (text: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
+      // Ensure any audio blob playback is stopped first so voices never overlap
+      if (currentAudioSourceRef.current) {
+        try { currentAudioSourceRef.current.stop(); } catch {}
+        currentAudioSourceRef.current = null;
+      }
+      if (currentAudioRef.current) {
+        try { currentAudioRef.current.pause(); } catch {}
+        currentAudioRef.current = null;
+      }
+
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
+
+      const voice = getFemaleVoice();
+      if (voice) {
+        utterance.voice = voice;
+      }
+
       utterance.onstart = () => {
         setIsTalking(true);
         setIsListeningMode(false);
@@ -299,8 +351,12 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
           setLatestCaption(currentSpeech);
 
           // If AI was speaking, user is barging in: stop AI audio
+          if (currentAudioSourceRef.current) {
+            try { currentAudioSourceRef.current.stop(); } catch {}
+            currentAudioSourceRef.current = null;
+          }
           if (currentAudioRef.current) {
-            currentAudioRef.current.pause();
+            try { currentAudioRef.current.pause(); } catch {}
             currentAudioRef.current = null;
           }
           if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -315,6 +371,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
             console.log('🗣️ Local SpeechRecognition sending utterance:', cleanText);
             setLatestUserTranscript(cleanText);
             setLatestCaption(cleanText);
+            hasSpokenAiTextRef.current = '';
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: 'user_speech',
@@ -384,6 +441,7 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       console.log('🔌 Connecting to Voice Server:', voiceUrl);
       const wsUrl = `${voiceUrl}?brandId=${brandId}`;
       const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'blob';
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -400,7 +458,18 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
 
       ws.onmessage = async (event) => {
         if (event.data instanceof Blob) {
-          // Received Audio Blob from AI
+          // Received Audio Blob from Deepgram AI TTS (Female Aura Asteria)
+          if (fallbackTtsTimerRef.current) {
+            clearTimeout(fallbackTtsTimerRef.current);
+            fallbackTtsTimerRef.current = null;
+          }
+          // Immediately stop any browser speech synthesis so only ONE voice speaks
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+          }
+          if (lastAiTextRef.current) {
+            hasSpokenAiTextRef.current = lastAiTextRef.current;
+          }
           playAudioBlob(event.data);
         } else if (typeof event.data === 'string') {
           try {
@@ -412,19 +481,32 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
                 setLatestCaption(msg.text);
                 setLatestUserTranscript('');
 
-                // Schedule browser speech synthesis fallback if no audio blob arrives within 700ms
-                if (fallbackTtsTimerRef.current) clearTimeout(fallbackTtsTimerRef.current);
-                fallbackTtsTimerRef.current = setTimeout(() => {
+                if (fallbackTtsTimerRef.current) {
+                  clearTimeout(fallbackTtsTimerRef.current);
+                  fallbackTtsTimerRef.current = null;
+                }
+
+                // If message explicitly specifies speakFallback and hasn't been spoken yet:
+                if (msg.speakFallback && msg.text && hasSpokenAiTextRef.current !== msg.text) {
+                  hasSpokenAiTextRef.current = msg.text;
                   speakWithBrowser(msg.text);
-                }, 400);
+                }
               } else if (msg.role === 'user') {
                 setLatestUserTranscript(msg.text);
                 setLatestCaption(msg.text);
               }
             } else if (msg.type === 'speak_text' && msg.text) {
+              if (fallbackTtsTimerRef.current) {
+                clearTimeout(fallbackTtsTimerRef.current);
+                fallbackTtsTimerRef.current = null;
+              }
               lastAiTextRef.current = msg.text;
               setLatestCaption(msg.text);
-              speakWithBrowser(msg.text);
+              // Only speak via browser if not already spoken by audio blob or previous event
+              if (hasSpokenAiTextRef.current !== msg.text) {
+                hasSpokenAiTextRef.current = msg.text;
+                speakWithBrowser(msg.text);
+              }
             } else if (msg.type === 'interest_detected' && msg.interested) {
               console.log('📩 Interest detected by agent');
               setUserInterested(true);
@@ -537,6 +619,11 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
       fallbackTtsTimerRef.current = null;
     }
 
+    // Immediately stop any browser speech synthesis so only ONE voice speaks
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
     try {
       if (currentAudioSourceRef.current) {
         try { currentAudioSourceRef.current.stop(); } catch {}
@@ -578,7 +665,8 @@ export default function VoiceInterface({ brand, brandId }: VoiceInterfaceProps) 
     } catch (e) {
       console.warn('Web Audio decode failed, falling back to instant speech synthesis:', e);
       setIsTalking(false);
-      if (lastAiTextRef.current) {
+      if (lastAiTextRef.current && hasSpokenAiTextRef.current !== lastAiTextRef.current) {
+        hasSpokenAiTextRef.current = lastAiTextRef.current;
         speakWithBrowser(lastAiTextRef.current);
       }
     }

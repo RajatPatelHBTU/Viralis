@@ -208,9 +208,11 @@ const handleWebConnection = async (ws, req) => {
         const transcript = rawText.trim();
         if (!transcript || transcript.length < 2)
             return;
+        const cleanNorm = transcript.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const lastNorm = lastProcessedTranscript.toLowerCase().replace(/[^a-z0-9]/g, '');
         const now = Date.now();
-        // Prevent duplicate processing unless explicitly forced by Pause to Reply
-        if (!force && (isProcessingUtterance || (transcript.toLowerCase() === lastProcessedTranscript.toLowerCase() && now - lastProcessedAt < 2500))) {
+        // Prevent duplicate processing from simultaneous STT engines (Deepgram STT + Browser WebSpeech)
+        if (!force && (isProcessingUtterance || (cleanNorm === lastNorm && now - lastProcessedAt < 4000))) {
             return;
         }
         isProcessingUtterance = true;
@@ -430,10 +432,12 @@ const handleWebConnection = async (ws, req) => {
                 }
                 catch {
                     ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: welcomeGreeting, speakFallback: true }));
+                    ws.send(JSON.stringify({ type: 'speak_text', text: welcomeGreeting }));
                 }
             }
             else {
                 ws.send(JSON.stringify({ type: 'transcript', role: 'ai', text: welcomeGreeting, speakFallback: true }));
+                ws.send(JSON.stringify({ type: 'speak_text', text: welcomeGreeting }));
             }
         }
     }, 500);

@@ -25,6 +25,8 @@ export interface IUser extends Document {
         };
     };
     comparePassword(candidate: string): Promise<boolean>;
+    resetPasswordToken?: string;
+    resetPasswordExpires?: Date;
     createdAt: Date;
     updatedAt: Date;
 }

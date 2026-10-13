@@ -47,6 +47,8 @@ const userSchema = new mongoose_1.Schema({
     avatar: { type: String }, // Optional custom avatar URL
     role: { type: String, enum: ['admin', 'user'], default: 'user' },
     businessId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Business', required: true },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
     socialAccounts: {
         youtube: {
             accessToken: String,

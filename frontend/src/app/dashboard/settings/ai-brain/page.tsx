@@ -120,6 +120,15 @@ export default function AIBrainPage() {
     }));
   };
 
+  const openSuperLink = () => {
+    if (!businessId) {
+      toast.error('Business ID is still loading. Please wait a moment.');
+      return;
+    }
+    const meetUrl = `${window.location.origin}/meet/${businessId}`;
+    window.open(meetUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const copySuperLink = () => {
     const url = `${window.location.origin}/meet/${businessId}`;
     navigator.clipboard.writeText(url);
@@ -153,19 +162,52 @@ export default function AIBrainPage() {
             <span className="text-sm font-semibold tracking-wider uppercase">Your Public Voice Portal</span>
           </div>
           <CardTitle className="text-xl text-gray-900">The Super Link</CardTitle>
-          <CardDescription className="text-gray-600">Share this link with your customers to let them talk to your AI agent instantly.</CardDescription>
+          <CardDescription className="text-gray-600">
+            Share this link with your customers to let them talk to your AI agent instantly.
+          </CardDescription>
         </CardHeader>
         <CardContent className="pt-6 relative z-10">
-          <div className="flex items-center gap-4 bg-white border border-blue-100 p-4 rounded-xl shadow-sm">
-            <div className="flex-1 font-mono text-sm text-gray-600 truncate bg-gray-50 px-3 py-1.5 rounded-md">
-              {typeof window !== 'undefined' ? `${window.location.origin}/meet/${businessId}` : `.../meet/${businessId}`}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-white border border-blue-100 p-4 rounded-xl shadow-sm">
+            <div
+              onClick={openSuperLink}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openSuperLink();
+                }
+              }}
+              className="flex-1 font-mono text-sm text-gray-700 hover:text-blue-600 bg-gray-50 hover:bg-blue-50/50 px-3 py-2 rounded-md cursor-pointer transition-colors border border-gray-200 flex items-center justify-between group/link min-w-0"
+              title="Click to open meet portal in a new tab"
+            >
+              <span className="truncate">
+                {typeof window !== 'undefined' && businessId
+                  ? `${window.location.origin}/meet/${businessId}`
+                  : typeof window !== 'undefined'
+                  ? `${window.location.origin}/meet/... (loading)`
+                  : `.../meet/${businessId || ''}`}
+              </span>
+              <ExternalLink className="w-4 h-4 text-gray-400 group-hover/link:text-blue-600 ml-2 shrink-0 transition-colors" />
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="!bg-white !border-gray-200 hover:!bg-gray-50 !text-gray-900 font-medium" onClick={() => window.open(`/meet/${businessId}`, '_blank')}>
-                <ExternalLink className="w-4 h-4 mr-2" />
+            <div className="flex gap-2 shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={openSuperLink}
+                className="!bg-white !border-gray-200 hover:!bg-gray-50 !text-gray-900 font-medium cursor-pointer shadow-sm active:scale-95 transition-all"
+                title="Test your AI Voice Assistant in a new tab"
+              >
+                <ExternalLink className="w-4 h-4 mr-2 text-blue-600" />
                 Test
               </Button>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md hover:shadow-lg transition-all" onClick={copySuperLink}>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md hover:shadow-lg active:scale-95 transition-all cursor-pointer"
+                onClick={copySuperLink}
+              >
                 <Copy className="w-4 h-4 mr-2" />
                 Copy Link
               </Button>

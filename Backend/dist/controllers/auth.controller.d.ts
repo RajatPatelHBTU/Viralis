@@ -4,5 +4,7 @@ export declare class AuthController {
     static login(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
     static me(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
     static updateUser(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
+    static forgotPassword(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
+    static resetPassword(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
 }
 //# sourceMappingURL=auth.controller.d.ts.map
